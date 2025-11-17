@@ -1,0 +1,56 @@
+# Build directories
+build/
+cmake-build-*/
+out/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+
+# Binaries
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+getroughtime
+roughtime-server
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-*
+
+# Logs and test outputs
+*.log
+*.test
+test_random
+Testing/
+CTestTestfile.cmake
+
+# Cache
+.cache/
+
+# Core dumps and profiling
+core
+core.*
+vgcore.*
+massif.out.*
+callgrind.out.*
+
+# Package files
+*.tar.gz
+*.zip
+*.deb
+*.rpm
+
+# Generated files
+_deps/

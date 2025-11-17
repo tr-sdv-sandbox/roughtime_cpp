@@ -1,0 +1,56 @@
+[Unit]
+Description=Roughtime Server - Secure time synchronization service
+Documentation=https://github.com/cloudflare/roughtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=roughtime
+Group=roughtime
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/roughtime
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RemoveIPC=true
+PrivateMounts=true
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=512
+
+# Working directory
+WorkingDirectory=/var/lib/roughtime
+
+# Executable and configuration
+ExecStart=/usr/local/bin/roughtime-server \
+    --addr 0.0.0.0 \
+    --port 2002 \
+    --key-file /var/lib/roughtime/server-key.bin \
+    --radius 1 \
+    --cert-validity 72
+
+# Restart policy
+Restart=on-failure
+RestartSec=5s
+StartLimitInterval=200s
+StartLimitBurst=5
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=roughtime-server
+
+[Install]
+WantedBy=multi-user.target

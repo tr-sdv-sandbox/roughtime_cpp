@@ -1,0 +1,40 @@
+{
+  "servers": [
+    {
+      "name": "txryan-1",
+      "version": "Google-Roughtime",
+      "publicKeyType": "ed25519",
+      "publicKey": "iBVjxg/1j7y1+kQUTBYdTabxCppesU/07D4PMDJk2WA=",
+      "addresses": [
+        {
+          "protocol": "udp",
+          "address": "time.txryan.com:2002"
+        }
+      ]
+    },
+    {
+      "name": "Netnod-sth1",
+      "version": "IETF-Roughtime",
+      "publicKeyType": "ed25519",
+      "publicKey": "9l1JN4HakGnG44yyqyNNCb0HN0XfsysBbnl/kbZoZDc=",
+      "addresses": [
+        {
+          "protocol": "udp",
+          "address": "sth1.roughtime.netnod.se:2002"
+        }
+      ]
+    },
+    {
+      "name": "Netnod-sth2",
+      "version": "IETF-Roughtime",
+      "publicKeyType": "ed25519",
+      "publicKey": "T/xxX4ERUBAOpt64Z8phWamKsASZxJ0VWuiPm3GS/8g=",
+      "addresses": [
+        {
+          "protocol": "udp",
+          "address": "sth2.roughtime.netnod.se:2002"
+        }
+      ]
+    }
+  ]
+}
