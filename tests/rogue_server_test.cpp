@@ -363,6 +363,56 @@ protected:
     }
 };
 
+// Helper for testing with real server (can apply time offset for testing wrong time)
+struct GoodServer {
+    server::keygen::KeyPair root_keypair;
+    std::unique_ptr<server::Server> server;
+    std::thread thread;
+    uint16_t port;
+
+    GoodServer(uint16_t p, std::chrono::seconds time_offset = std::chrono::seconds(0)) : port(p) {
+        root_keypair = server::keygen::generate_keypair();
+
+        server::ServerConfig config;
+        config.address = "127.0.0.1";
+        config.port = port;
+        config.root_private_key = root_keypair.private_key;
+        config.radius = std::chrono::seconds(1);
+        config.cert_validity = std::chrono::hours(48);
+        config.time_offset = time_offset;  // Apply time offset (0 = real time)
+
+        server = std::make_unique<server::Server>(config);
+        thread = std::thread([this]() {
+            server->run();
+        });
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    ~GoodServer() {
+        if (server) {
+            server->stop();
+        }
+        if (thread.joinable()) {
+            thread.join();
+        }
+    }
+
+    Server get_client_config() {
+        Server srv;
+        srv.name = "good-server-" + std::to_string(port);
+        srv.version = "IETF-Roughtime";
+        srv.public_key = root_keypair.public_key;
+
+        ServerAddress addr;
+        addr.protocol = "udp";
+        addr.address = "127.0.0.1:" + std::to_string(port);
+        srv.addresses = {addr};
+
+        return srv;
+    }
+};
+
 TEST_F(RogueServerTest, RejectInvalidSignature) {
     InvalidSignatureServer rogue(25001);
     rogue.start();
@@ -752,8 +802,8 @@ TEST_F(RogueServerTest, RejectInvalidMerkleProof) {
 }
 
 TEST_F(RogueServerTest, RejectTimeWayOutOfBounds) {
-    // Server claiming time is 100 years in future
-    GoodServer rogue(25005, std::chrono::seconds(100LL * 365 * 86400));
+    // Server claiming time is 10 years in future
+    GoodServer rogue(25005, std::chrono::seconds(10LL * 365 * 86400));
 
     Server srv = rogue.get_client_config();
     srv.name = "wrong-time-server";
@@ -772,56 +822,6 @@ TEST_F(RogueServerTest, RejectTimeWayOutOfBounds) {
 }
 
 // Multi-server tests with mixed good and rogue servers
-
-// Helper to create a good server
-struct GoodServer {
-    server::keygen::KeyPair root_keypair;
-    std::unique_ptr<server::Server> server;
-    std::thread thread;
-    uint16_t port;
-
-    GoodServer(uint16_t p, std::chrono::seconds time_offset = std::chrono::seconds(0)) : port(p) {
-        root_keypair = server::keygen::generate_keypair();
-
-        server::ServerConfig config;
-        config.address = "127.0.0.1";
-        config.port = port;
-        config.root_private_key = root_keypair.private_key;
-        config.radius = std::chrono::seconds(1);
-        config.cert_validity = std::chrono::hours(48);
-        config.time_offset = time_offset;  // Apply time offset (0 = real time)
-
-        server = std::make_unique<server::Server>(config);
-        thread = std::thread([this]() {
-            server->run();
-        });
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-
-    ~GoodServer() {
-        if (server) {
-            server->stop();
-        }
-        if (thread.joinable()) {
-            thread.join();
-        }
-    }
-
-    Server get_client_config() {
-        Server srv;
-        srv.name = "good-server-" + std::to_string(port);
-        srv.version = "IETF-Roughtime";
-        srv.public_key = root_keypair.public_key;
-
-        ServerAddress addr;
-        addr.protocol = "udp";
-        addr.address = "127.0.0.1:" + std::to_string(port);
-        srv.addresses = {addr};
-
-        return srv;
-    }
-};
 
 TEST_F(RogueServerTest, OneGoodOneBadTimeCannotEstablishTrust) {
     // Real attack: Both servers cryptographically valid, but one lies about time
