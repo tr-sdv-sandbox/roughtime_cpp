@@ -82,9 +82,21 @@ target_link_libraries(server_performance_test
 )
 gtest_discover_tests(server_performance_test)
 
+# Causal ordering tests (RFC 8.2 compliance)
+add_executable(causal_ordering_test causal_ordering_test.cpp)
+target_link_libraries(causal_ordering_test
+    PRIVATE
+        roughtime
+        roughtime_client
+        roughtime_server
+        GTest::gtest
+        GTest::gtest_main
+)
+gtest_discover_tests(causal_ordering_test)
+
 # Add custom target to run all tests
 add_custom_target(check
     COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
-    DEPENDS protocol_test crypto_test client_integration_test server_integration_test rogue_server_test security_test server_performance_test
+    DEPENDS protocol_test crypto_test client_integration_test server_integration_test rogue_server_test security_test server_performance_test causal_ordering_test
     COMMENT "Running all tests..."
 )

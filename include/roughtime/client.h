@@ -29,6 +29,22 @@ struct QueryResult {
     bool is_success() const noexcept { return error.empty(); }
 };
 
+// Malfeasance report - records causal ordering violation
+struct MalfeasanceReport {
+    size_t server_i_index;  // Earlier query index
+    size_t server_j_index;  // Later query index
+    std::string server_i_name;
+    std::string server_j_name;
+    std::chrono::system_clock::time_point midpoint_i;
+    std::chrono::system_clock::time_point midpoint_j;
+    std::chrono::seconds radius_i;
+    std::chrono::seconds radius_j;
+    std::vector<uint8_t> response_i;  // Full response for proof
+    std::vector<uint8_t> response_j;  // Full response for proof
+
+    std::string to_string() const;
+};
+
 // Result of querying multiple servers for trusted time
 struct TrustedTimeResult {
     std::chrono::system_clock::time_point time;
@@ -36,11 +52,13 @@ struct TrustedTimeResult {
     size_t agreeing_servers;
     size_t total_queried;
     std::vector<QueryResult> all_results;
+    std::optional<MalfeasanceReport> malfeasance;  // Set if causal ordering violated
     std::string error;
 
     bool is_trusted() const noexcept {
         // Require at least 3 successful servers to establish trust
-        return error.empty() && agreeing_servers >= 3;
+        // AND no malfeasance detected
+        return error.empty() && agreeing_servers >= 3 && !malfeasance.has_value();
     }
 
     bool is_success() const noexcept { return error.empty(); }
@@ -118,6 +136,14 @@ std::optional<MedianDeltaResult> calculate_median_delta(
     const std::vector<QueryResult>& results,
     std::chrono::system_clock::time_point reference_time,
     std::chrono::seconds radius_threshold
+);
+
+// Validate causal ordering of query results
+// Per RFC 8.2: For each pair (i, j) where i received before j,
+// must check: MIDP_i - RADI_i <= MIDP_j + RADI_j
+// Returns nullopt if valid, or MalfeasanceReport if violation detected
+std::optional<MalfeasanceReport> validate_causal_ordering(
+    const std::vector<QueryResult>& results
 );
 
 } // namespace roughtime

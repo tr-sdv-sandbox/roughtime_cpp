@@ -1069,18 +1069,19 @@ TEST_F(RogueServerTest, TrustedTimeAPIRejectsMajorityRogue) {
     Client client;
     auto result = client.query_for_trusted_time(servers, 3);
 
-    // All 5 servers respond successfully
-    ASSERT_TRUE(result.is_success());
-    ASSERT_EQ(result.total_queried, 5);
-    ASSERT_EQ(result.agreeing_servers, 5);
+    // With RFC 8.2 causal ordering validation, this attack is now DETECTED!
+    // The rogue servers (+1 year) violate causal ordering when queried after good servers
+    ASSERT_FALSE(result.is_trusted()) << "Should detect malfeasance and not trust time";
+    ASSERT_TRUE(result.malfeasance.has_value()) << "Should detect causal ordering violation";
 
-    // However, the median time will be wrong (closer to rogue time)
-    auto now = std::chrono::system_clock::now();
-    auto diff = std::chrono::duration_cast<std::chrono::seconds>(
-        result.time - now).count();
+    // Verify malfeasance report contains details
+    if (result.malfeasance) {
+        EXPECT_FALSE(result.malfeasance->server_i_name.empty());
+        EXPECT_FALSE(result.malfeasance->server_j_name.empty());
+        EXPECT_FALSE(result.malfeasance->response_i.empty());
+        EXPECT_FALSE(result.malfeasance->response_j.empty());
+    }
 
-    // With 3/5 servers lying about +1 year, median is wrong
-    // This demonstrates that even with is_trusted()=true, you need
-    // to trust the OPERATORS of the servers, not just have 3+ responses
-    ASSERT_GT(diff, 300 * 86400); // Time is way off
+    // This test now demonstrates that RFC 8.2 causal ordering validation
+    // PREVENTS this attack - we detect the inconsistency and reject the time
 }
