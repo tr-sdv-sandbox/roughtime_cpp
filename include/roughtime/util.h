@@ -97,7 +97,7 @@ inline std::optional<std::vector<uint8_t>> decode_base64(const std::string& inpu
         char_values[static_cast<uint8_t>(base64_chars[i])] = static_cast<int>(i);
     }
 
-    int val = 0;
+    uint32_t val = 0;
     int bits = -8;
 
     for (char c : input) {
@@ -107,7 +107,7 @@ inline std::optional<std::vector<uint8_t>> decode_base64(const std::string& inpu
             continue;
         }
 
-        val = (val << 6) + char_values[uc];
+        val = (val << 6) + static_cast<uint32_t>(char_values[uc]);
         bits += 6;
 
         if (bits >= 0) {
