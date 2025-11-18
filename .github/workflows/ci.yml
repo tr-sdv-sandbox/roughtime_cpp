@@ -38,3 +38,34 @@ jobs:
     - name: Run tests
       working-directory: build
       run: ctest --output-on-failure -C ${{ matrix.build_type }}
+
+  sanitizers:
+    runs-on: ubuntu-24.04
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          cmake \
+          pkg-config \
+          libssl-dev \
+          libgoogle-glog-dev \
+          libgtest-dev \
+          nlohmann-json3-dev
+
+    - name: Configure CMake with sanitizers
+      run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON
+
+    - name: Build with sanitizers
+      run: cmake --build build -j$(nproc)
+
+    - name: Run tests with sanitizers
+      working-directory: build
+      run: ctest --output-on-failure
+      env:
+        ASAN_OPTIONS: detect_leaks=1:strict_string_checks=1:detect_stack_use_after_return=1:check_initialization_order=1:strict_init_order=1
+        UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
