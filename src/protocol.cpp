@@ -61,9 +61,180 @@ std::string version_to_string(Version ver) {
         case Version::Draft07: return "draft-ietf-ntp-roughtime-07";
         case Version::Draft08: return "draft-ietf-ntp-roughtime-08";
         case Version::Draft11: return "draft-ietf-ntp-roughtime-11";
+        case Version::Draft14: return "draft-ietf-ntp-roughtime-14";
         default: return "Unknown";
     }
 }
+
+// Timestamp utility implementations
+namespace timestamp {
+    constexpr uint64_t UNIX_EPOCH_MJD = 40587;  // Unix epoch (Jan 1, 1970) in MJD
+
+    // Google-Roughtime: Parse Unix microseconds
+    std::chrono::system_clock::time_point parse_midpoint_google(uint64_t midpoint_val) {
+        return std::chrono::system_clock::from_time_t(static_cast<time_t>(midpoint_val / 1000000)) +
+               std::chrono::microseconds(midpoint_val % 1000000);
+    }
+
+    // Draft-07/08/11: Parse Modified Julian Date (MJD)
+    // Top 24 bits: Days since Nov 17, 1858
+    // Bottom 40 bits: Microseconds since midnight
+    std::chrono::system_clock::time_point parse_midpoint_mjd(uint64_t midpoint_val) {
+        uint64_t mjd = midpoint_val >> 40;
+        uint64_t usec_of_day = midpoint_val & 0xFFFFFFFFFF;
+
+        int64_t days_since_unix_epoch = static_cast<int64_t>(mjd - UNIX_EPOCH_MJD);
+
+        return std::chrono::system_clock::from_time_t(days_since_unix_epoch * 86400) +
+               std::chrono::microseconds(usec_of_day);
+    }
+
+    // Draft-14: Parse Unix seconds
+    std::chrono::system_clock::time_point parse_midpoint_unix_seconds(uint64_t midpoint_val) {
+        return std::chrono::system_clock::from_time_t(static_cast<time_t>(midpoint_val));
+    }
+
+    // Dispatcher based on version
+    std::chrono::system_clock::time_point parse_midpoint(Version version, uint64_t midpoint_val) {
+        switch (version) {
+            case Version::Google:
+                return parse_midpoint_google(midpoint_val);
+            case Version::Draft07:
+            case Version::Draft08:
+            case Version::Draft11:
+                return parse_midpoint_mjd(midpoint_val);
+            case Version::Draft14:
+                return parse_midpoint_unix_seconds(midpoint_val);
+            default:
+                throw std::invalid_argument("Unknown version for timestamp parsing");
+        }
+    }
+
+    // Encode Google-Roughtime: Unix microseconds
+    uint64_t encode_midpoint_google(std::chrono::system_clock::time_point time) {
+        auto unix_time = std::chrono::duration_cast<std::chrono::microseconds>(
+            time.time_since_epoch()
+        );
+        return static_cast<uint64_t>(unix_time.count());
+    }
+
+    // Encode MJD for Draft-07/08/11
+    uint64_t encode_midpoint_mjd(std::chrono::system_clock::time_point time) {
+        auto unix_time = std::chrono::system_clock::to_time_t(time);
+        auto usec = std::chrono::duration_cast<std::chrono::microseconds>(
+            time.time_since_epoch()
+        ).count() % 1000000;
+
+        int64_t days_since_unix = unix_time / 86400;
+        int64_t sec_of_day = unix_time % 86400;
+        uint64_t usec_of_day = static_cast<uint64_t>(sec_of_day * 1000000 + usec);
+
+        uint64_t mjd = UNIX_EPOCH_MJD + static_cast<uint64_t>(days_since_unix);
+
+        // Pack into MJD timestamp: top 24 bits = MJD, bottom 40 bits = microseconds
+        return (mjd << 40) | (usec_of_day & 0xFFFFFFFFFF);
+    }
+
+    // Encode Draft-14: Unix seconds
+    uint64_t encode_midpoint_unix_seconds(std::chrono::system_clock::time_point time) {
+        auto unix_time = std::chrono::system_clock::to_time_t(time);
+        return static_cast<uint64_t>(unix_time);
+    }
+
+    // Dispatcher for encoding
+    uint64_t encode_midpoint(Version version, std::chrono::system_clock::time_point time) {
+        switch (version) {
+            case Version::Google:
+                return encode_midpoint_google(time);
+            case Version::Draft07:
+            case Version::Draft08:
+            case Version::Draft11:
+                return encode_midpoint_mjd(time);
+            case Version::Draft14:
+                return encode_midpoint_unix_seconds(time);
+            default:
+                throw std::invalid_argument("Unknown version for timestamp encoding");
+        }
+    }
+
+    // Parse radius for Google-Roughtime (microseconds stored, but we return seconds)
+    std::chrono::seconds parse_radius_google(uint64_t radius_val) {
+        // Google stores radius in microseconds, convert to seconds (rounding up)
+        return std::chrono::seconds((radius_val + 999999) / 1000000);
+    }
+
+    // Parse radius for IETF drafts (all store in seconds)
+    std::chrono::seconds parse_radius_ietf(uint64_t radius_val) {
+        return std::chrono::seconds(radius_val);
+    }
+
+    // Dispatcher for radius parsing
+    std::chrono::seconds parse_radius(Version version, uint64_t radius_val) {
+        switch (version) {
+            case Version::Google:
+                return parse_radius_google(radius_val);
+            case Version::Draft07:
+            case Version::Draft08:
+            case Version::Draft11:
+            case Version::Draft14:
+                return parse_radius_ietf(radius_val);
+            default:
+                throw std::invalid_argument("Unknown version for radius parsing");
+        }
+    }
+
+    // Encode radius for Google (convert seconds to microseconds)
+    uint64_t encode_radius_google(std::chrono::seconds radius) {
+        return static_cast<uint64_t>(radius.count()) * 1000000;
+    }
+
+    // Encode radius for IETF (already in seconds)
+    uint64_t encode_radius_ietf(std::chrono::seconds radius) {
+        return static_cast<uint64_t>(radius.count());
+    }
+
+    // Dispatcher for radius encoding
+    uint64_t encode_radius(Version version, std::chrono::seconds radius) {
+        switch (version) {
+            case Version::Google:
+                return encode_radius_google(radius);
+            case Version::Draft07:
+            case Version::Draft08:
+            case Version::Draft11:
+            case Version::Draft14:
+                return encode_radius_ietf(radius);
+            default:
+                throw std::invalid_argument("Unknown version for radius encoding");
+        }
+    }
+
+    // Certificate context strings per version
+    const char* cert_context_string(Version version) {
+        switch (version) {
+            case Version::Google:
+                return CERTIFICATE_CONTEXT_DRAFT07;  // Same as draft-07
+            case Version::Draft07:
+                return CERTIFICATE_CONTEXT_DRAFT07;
+            case Version::Draft08:
+            case Version::Draft11:
+                return CERTIFICATE_CONTEXT_DRAFT08PLUS;
+            case Version::Draft14:
+                return "RoughTime v1 delegation signature";  // Simplified, no null terminator
+            default:
+                return CERTIFICATE_CONTEXT_DRAFT07;
+        }
+    }
+
+    // Response context strings per version
+    const char* response_context_string(Version version) {
+        switch (version) {
+            case Version::Draft14:
+                return "RoughTime v1 response signature";  // Simplified, no null terminator
+            default:
+                return SIGNED_RESPONSE_CONTEXT;  // All others use the same
+        }
+    }
+} // namespace timestamp
 
 size_t nonce_size(bool version_ietf) {
     return version_ietf ? 32 : 64;
@@ -78,7 +249,8 @@ std::vector<Version> advertised_versions_from_preference(
     const std::vector<Version>& preference
 ) {
     if (preference.empty()) {
-        return {Version::Draft11, Version::Draft08, Version::Draft07};
+        // Default: Prefer newest drafts first
+        return {Version::Draft14, Version::Draft11, Version::Draft08, Version::Draft07};
     }
 
     bool has_google = std::any_of(preference.begin(), preference.end(),
@@ -399,7 +571,8 @@ std::optional<VerifiedReply> verify_reply(
                 return std::nullopt;
             }
             response_ver = static_cast<Version>(read_le32(ver_it->second.data()));
-            LOG(INFO) << "Server reports version: 0x" << std::hex << static_cast<uint32_t>(response_ver);
+            LOG(INFO) << "Server reports version: 0x" << std::hex << static_cast<uint32_t>(response_ver)
+                      << std::dec << " (" << version_to_string(response_ver) << ")";
 
             bool version_ok = std::any_of(advertised.begin(), advertised.end(),
                 [response_ver](Version v) { return v == response_ver; });
@@ -438,9 +611,8 @@ std::optional<VerifiedReply> verify_reply(
         if (sig_it->second.size() != ED25519_SIGNATURE_SIZE) return std::nullopt;
 
         // Use appropriate certificate context based on version
-        const char* cert_context = (response_ver == Version::Draft07) ?
-            CERTIFICATE_CONTEXT_DRAFT07 : CERTIFICATE_CONTEXT_DRAFT08PLUS;
-        size_t cert_context_len = (response_ver == Version::Draft07) ? 34 : 36;
+        const char* cert_context = timestamp::cert_context_string(response_ver);
+        size_t cert_context_len = std::strlen(cert_context);
 
         std::vector<uint8_t> cert_msg(cert_context, cert_context + cert_context_len);
         cert_msg.insert(cert_msg.end(), dele_it->second.begin(), dele_it->second.end());
@@ -495,7 +667,10 @@ std::optional<VerifiedReply> verify_reply(
             return std::nullopt;
         }
 
-        std::vector<uint8_t> resp_msg(SIGNED_RESPONSE_CONTEXT, SIGNED_RESPONSE_CONTEXT + 32);
+        const char* response_context = timestamp::response_context_string(response_ver);
+        size_t response_context_len = std::strlen(response_context);
+
+        std::vector<uint8_t> resp_msg(response_context, response_context + response_context_len);
         resp_msg.insert(resp_msg.end(), srep_it->second.begin(), srep_it->second.end());
 
         std::array<uint8_t, ED25519_SIGNATURE_SIZE> resp_sig;
@@ -635,28 +810,10 @@ std::optional<VerifiedReply> verify_reply(
 
         LOG(INFO) << "Merkle path verification passed";
 
-        // Convert to time
+        // Convert to time using version-specific parsing
         VerifiedReply result;
-        if (version_ietf) {
-            // IETF Roughtime uses Modified Julian Date (MJD) timestamps
-            // Top 24 bits: MJD (days since Nov 17, 1858)
-            // Bottom 40 bits: Microseconds since midnight
-            uint64_t mjd = midpoint_val >> 40;
-            uint64_t usec_of_day = midpoint_val & 0xFFFFFFFFFF;
-
-            // Unix epoch (Jan 1, 1970) is MJD 40587
-            const uint64_t UNIX_EPOCH_MJD = 40587;
-            int64_t days_since_unix_epoch = static_cast<int64_t>(mjd - UNIX_EPOCH_MJD);
-
-            result.midpoint = std::chrono::system_clock::from_time_t(days_since_unix_epoch * 86400) +
-                            std::chrono::microseconds(usec_of_day);
-            result.radius = std::chrono::microseconds(radius_val * 1000000);  // radius is in seconds
-        } else {
-            // Google Roughtime uses microseconds since Unix epoch
-            result.midpoint = std::chrono::system_clock::from_time_t(static_cast<time_t>(midpoint_val / 1000000)) +
-                            std::chrono::microseconds(midpoint_val % 1000000);
-            result.radius = std::chrono::microseconds(radius_val);
-        }
+        result.midpoint = timestamp::parse_midpoint(response_ver, midpoint_val);
+        result.radius = timestamp::parse_radius(response_ver, radius_val);
 
         return result;
     } catch (const std::exception& e) {

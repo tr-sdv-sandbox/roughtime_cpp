@@ -226,8 +226,9 @@ std::optional<Certificate> create_certificate(
 
         auto dele_bytes = encode(dele);
 
-        // Sign delegation
-        std::vector<uint8_t> to_sign(CERTIFICATE_CONTEXT, CERTIFICATE_CONTEXT + CERTIFICATE_CONTEXT_LEN);
+        // Sign delegation (use Draft-08+ context string for MJD-based certificates)
+        const char* context = timestamp::cert_context_string(Version::Draft08);
+        std::vector<uint8_t> to_sign(context, context + std::strlen(context));
         to_sign.insert(to_sign.end(), dele_bytes.begin(), dele_bytes.end());
 
         std::array<uint8_t, 64> signature;
@@ -237,7 +238,42 @@ std::optional<Certificate> create_certificate(
         cert_msg[tags::DELE] = dele_bytes;
         cert_msg[tags::SIG] = std::vector<uint8_t>(signature.begin(), signature.end());
 
-        cert.bytes_ietf = encode(cert_msg);
+        cert.bytes_ietf_mjd = encode(cert_msg);
+    }
+
+    // Draft-14 version (Unix seconds)
+    {
+        auto min_seconds = std::chrono::duration_cast<std::chrono::seconds>(
+            min_time.time_since_epoch()).count();
+        auto max_seconds = std::chrono::duration_cast<std::chrono::seconds>(
+            max_time.time_since_epoch()).count();
+
+        Message dele_draft14;
+        dele_draft14[tags::PUBK] = std::vector<uint8_t>(online_public_key.begin(), online_public_key.end());
+
+        std::vector<uint8_t> mint_bytes(8);
+        std::vector<uint8_t> maxt_bytes(8);
+        write_le64(mint_bytes.data(), static_cast<uint64_t>(min_seconds));
+        write_le64(maxt_bytes.data(), static_cast<uint64_t>(max_seconds));
+
+        dele_draft14[tags::MINT] = mint_bytes;
+        dele_draft14[tags::MAXT] = maxt_bytes;
+
+        auto dele_bytes_draft14 = encode(dele_draft14);
+
+        // Sign delegation (use draft-14 context string)
+        const char* context = "RoughTime v1 delegation signature";
+        std::vector<uint8_t> to_sign(context, context + std::strlen(context));
+        to_sign.insert(to_sign.end(), dele_bytes_draft14.begin(), dele_bytes_draft14.end());
+
+        std::array<uint8_t, 64> signature_draft14;
+        ed25519_sign(signature_draft14, to_sign.data(), to_sign.size(), root_private_key.data());
+
+        Message cert_msg_draft14;
+        cert_msg_draft14[tags::DELE] = dele_bytes_draft14;
+        cert_msg_draft14[tags::SIG] = std::vector<uint8_t>(signature_draft14.begin(), signature_draft14.end());
+
+        cert.bytes_draft14 = encode(cert_msg_draft14);
     }
 
     // Google version (microseconds since epoch)
@@ -260,8 +296,9 @@ std::optional<Certificate> create_certificate(
 
         auto dele_bytes_google = encode(dele_google);
 
-        // Sign delegation
-        std::vector<uint8_t> to_sign(CERTIFICATE_CONTEXT, CERTIFICATE_CONTEXT + CERTIFICATE_CONTEXT_LEN);
+        // Sign delegation (use Google/Draft-07 context string)
+        const char* context = timestamp::cert_context_string(Version::Google);
+        std::vector<uint8_t> to_sign(context, context + std::strlen(context));
         to_sign.insert(to_sign.end(), dele_bytes_google.begin(), dele_bytes_google.end());
 
         std::array<uint8_t, 64> signature;
@@ -325,8 +362,10 @@ std::optional<ParsedRequest> parse_request(const std::vector<uint8_t>& request_b
             req.versions.push_back(Version::Draft08);
         }
 
-        // Select response version (prefer Draft11, then Draft08, then Draft07)
-        if (std::find(req.versions.begin(), req.versions.end(), Version::Draft11) != req.versions.end()) {
+        // Select response version (prefer Draft14, then Draft11, then Draft08, then Draft07)
+        if (std::find(req.versions.begin(), req.versions.end(), Version::Draft14) != req.versions.end()) {
+            req.response_version = Version::Draft14;
+        } else if (std::find(req.versions.begin(), req.versions.end(), Version::Draft11) != req.versions.end()) {
             req.response_version = Version::Draft11;
         } else if (std::find(req.versions.begin(), req.versions.end(), Version::Draft08) != req.versions.end()) {
             req.response_version = Version::Draft08;
@@ -386,34 +425,12 @@ std::vector<std::vector<uint8_t>> create_replies(
     crypto::MerkleTree tree(nonce_size, nonces);
     auto root = tree.root();
 
-    // Create signed response
-    uint64_t midpoint_val;
-    uint32_t radius_val;
+    // Create signed response using version-specific encoding
+    // Note: All requests in the batch should use the same version (first request's version)
+    Version response_version = requests.empty() ? Version::Google : requests[0].response_version;
 
-    if (version_ietf) {
-        // IETF Roughtime uses Modified Julian Date (MJD) format
-        // Top 24 bits: MJD (days since Nov 17, 1858)
-        // Bottom 40 bits: Microseconds since midnight
-        auto unix_seconds = std::chrono::duration_cast<std::chrono::seconds>(
-            midpoint.time_since_epoch()).count();
-
-        // Unix epoch (Jan 1, 1970) is MJD 40587
-        const uint64_t UNIX_EPOCH_MJD = 40587;
-        uint64_t days_since_unix = static_cast<uint64_t>(unix_seconds / 86400);
-        uint64_t mjd = UNIX_EPOCH_MJD + days_since_unix;
-
-        // Microseconds since midnight
-        uint64_t secs_of_day = static_cast<uint64_t>(unix_seconds % 86400);
-        uint64_t usec_of_day = secs_of_day * 1000000;
-
-        // Pack into MJD timestamp
-        midpoint_val = (mjd << 40) | (usec_of_day & 0xFFFFFFFFFF);
-        radius_val = static_cast<uint32_t>(radius.count());
-    } else {
-        midpoint_val = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
-            midpoint.time_since_epoch()).count());
-        radius_val = static_cast<uint32_t>(std::chrono::duration_cast<std::chrono::microseconds>(radius).count());
-    }
+    uint64_t midpoint_val = timestamp::encode_midpoint(response_version, midpoint);
+    uint32_t radius_val = static_cast<uint32_t>(timestamp::encode_radius(response_version, radius));
 
     Message srep;
     std::vector<uint8_t> midp_bytes(8);
@@ -427,8 +444,9 @@ std::vector<std::vector<uint8_t>> create_replies(
 
     auto srep_bytes = encode(srep);
 
-    // Sign the response
-    std::vector<uint8_t> to_sign(SIGNED_RESPONSE_CONTEXT, SIGNED_RESPONSE_CONTEXT + SIGNED_RESPONSE_CONTEXT_LEN);
+    // Sign the response (use version-specific context string)
+    const char* response_context = timestamp::response_context_string(response_version);
+    std::vector<uint8_t> to_sign(response_context, response_context + std::strlen(response_context));
     to_sign.insert(to_sign.end(), srep_bytes.begin(), srep_bytes.end());
 
     std::array<uint8_t, 64> signature;
@@ -438,7 +456,15 @@ std::vector<std::vector<uint8_t>> create_replies(
     Message reply_template;
     reply_template[tags::SREP] = srep_bytes;
     reply_template[tags::SIG] = std::vector<uint8_t>(signature.begin(), signature.end());
-    reply_template[tags::CERT] = version_ietf ? cert.bytes_ietf : cert.bytes_google;
+
+    // Choose certificate based on response version
+    if (response_version == Version::Draft14) {
+        reply_template[tags::CERT] = cert.bytes_draft14;
+    } else if (version_ietf) {
+        reply_template[tags::CERT] = cert.bytes_ietf_mjd;
+    } else {
+        reply_template[tags::CERT] = cert.bytes_google;
+    }
 
     if (version_ietf) {
         std::vector<uint8_t> ver_bytes(4);
@@ -496,8 +522,8 @@ public:
         // Generate online keypair
         auto online_kp = keygen::generate_keypair();
 
-        // Create certificate
-        auto now = std::chrono::system_clock::now();
+        // Create certificate (apply time offset for testing)
+        auto now = std::chrono::system_clock::now() + config_.time_offset;
         auto min_time = now - std::chrono::hours(24);
         auto max_time = now + config_.cert_validity;
 
@@ -607,8 +633,8 @@ private:
             return;
         }
 
-        // Create reply
-        auto now = std::chrono::system_clock::now();
+        // Create reply (apply time offset for testing)
+        auto now = std::chrono::system_clock::now() + config_.time_offset;
         auto replies = create_replies({*req}, now, config_.radius, cert_);
 
         if (replies.empty()) {

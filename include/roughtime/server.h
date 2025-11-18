@@ -21,11 +21,12 @@ namespace server {
 
 // Certificate that delegates from root key to online key
 struct Certificate {
-    std::vector<uint8_t> bytes_ietf;      // IETF-Roughtime certificate
-    std::vector<uint8_t> bytes_google;    // Google-Roughtime certificate
+    std::vector<uint8_t> bytes_ietf_mjd;     // IETF-Roughtime certificate (Draft-07/08/11 with MJD)
+    std::vector<uint8_t> bytes_draft14;      // IETF-Roughtime certificate (Draft-14 with Unix seconds)
+    std::vector<uint8_t> bytes_google;       // Google-Roughtime certificate
     std::array<uint8_t, ED25519_PUBLIC_KEY_SIZE> online_public_key;
     std::array<uint8_t, 64> online_private_key;  // Ed25519 private key (64 bytes)
-    std::vector<uint8_t> srv_hash;        // Hash for SRV tag
+    std::vector<uint8_t> srv_hash;           // Hash for SRV tag
 };
 
 // Create a delegation certificate
@@ -46,6 +47,7 @@ struct ServerConfig {
     std::chrono::seconds radius;  // Uncertainty radius
     std::chrono::hours cert_validity;  // Certificate validity duration
     RateLimitConfig rate_limit;  // Rate limiting configuration
+    std::chrono::seconds time_offset{0};  // Time offset for testing (0 = real time)
 };
 
 // Parsed client request
