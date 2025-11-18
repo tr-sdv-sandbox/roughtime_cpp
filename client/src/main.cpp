@@ -30,31 +30,22 @@ namespace {
                   << "  -c, --config FILE      JSON configuration file with server list\n"
                   << "  -p, --ping ADDR        Ping a single server (e.g., localhost:2002)\n"
                   << "  -k, --pubkey KEY       Base64-encoded Ed25519 public key for ping\n"
-                  << "  -v, --ping-version VER Version for ping (IETF-Roughtime or Google-Roughtime)\n"
+                  << "  -v, --ping-version VER Version for ping (default: IETF-Roughtime)\n"
+                  << "                         Options: IETF-Roughtime, Google-Roughtime\n"
                   << "  -a, --attempts NUM     Number of query attempts per server (default: 3)\n"
                   << "  -t, --timeout MS       Timeout in milliseconds (default: 1000)\n"
                   << "  -V, --version          Print version and exit\n"
                   << "  -h, --help             Show this help message\n";
     }
 
-    std::string format_duration(std::chrono::microseconds duration) {
+    std::string format_duration(std::chrono::seconds duration) {
         using namespace std::chrono;
 
-        auto s = duration_cast<seconds>(duration);
-        auto ms = duration_cast<milliseconds>(duration - s);
-        auto us = duration_cast<microseconds>(duration - s - ms);
-
         std::ostringstream oss;
-        if (s.count() > 0) {
-            oss << s.count() << "s";
-        }
-        if (ms.count() > 0) {
-            if (s.count() > 0) oss << " ";
-            oss << ms.count() << "ms";
-        }
-        if (us.count() > 0 && s.count() == 0) {
-            if (ms.count() > 0) oss << " ";
-            oss << us.count() << "µs";
+        if (duration.count() > 0) {
+            oss << duration.count() << "s";
+        } else {
+            oss << "0s";
         }
         return oss.str();
     }
@@ -89,7 +80,7 @@ int main(int argc, char* argv[]) {
     std::string config_file;
     std::string ping_addr;
     std::string ping_pubkey;
-    std::string ping_version = "Google-Roughtime";
+    std::string ping_version = "IETF-Roughtime";  // Default to IETF (advertises Draft-14, 11, 08, 07)
     int attempts = 3;
     int timeout_ms = 1000;
     bool show_version = false;

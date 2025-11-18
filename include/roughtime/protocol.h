@@ -22,7 +22,8 @@ enum class Version : uint32_t {
     Google = 0,           // Google-Roughtime
     Draft07 = 0x80000007, // draft-ietf-ntp-roughtime-07
     Draft08 = 0x80000008, // draft-ietf-ntp-roughtime-08
-    Draft11 = 0x8000000b  // draft-ietf-ntp-roughtime-11
+    Draft11 = 0x8000000b, // draft-ietf-ntp-roughtime-11
+    Draft14 = 0x8000000e  // draft-ietf-ntp-roughtime-14
 };
 
 std::string version_to_string(Version ver);
@@ -66,6 +67,41 @@ namespace tags {
 // Type alias for protocol messages
 using Message = std::map<uint32_t, std::vector<uint8_t>>;
 
+// Timestamp conversion utilities (version-specific parsing)
+namespace timestamp {
+    // Parse MIDP timestamp value based on version
+    // Google: Unix microseconds since epoch
+    // Draft-07/08/11: Modified Julian Date (MJD) - top 24 bits=days, bottom 40 bits=microseconds
+    // Draft-14: Unix seconds since epoch
+    std::chrono::system_clock::time_point parse_midpoint_google(uint64_t midpoint_val);
+    std::chrono::system_clock::time_point parse_midpoint_mjd(uint64_t midpoint_val);
+    std::chrono::system_clock::time_point parse_midpoint_unix_seconds(uint64_t midpoint_val);
+    std::chrono::system_clock::time_point parse_midpoint(Version version, uint64_t midpoint_val);
+
+    // Encode time_point to wire format based on version
+    uint64_t encode_midpoint_google(std::chrono::system_clock::time_point time);
+    uint64_t encode_midpoint_mjd(std::chrono::system_clock::time_point time);
+    uint64_t encode_midpoint_unix_seconds(std::chrono::system_clock::time_point time);
+    uint64_t encode_midpoint(Version version, std::chrono::system_clock::time_point time);
+
+    // Parse RADI radius value based on version
+    // Google: Microseconds
+    // Draft-07/08/11: Seconds (stored as uint32, converted to microseconds)
+    // Draft-14: Seconds
+    std::chrono::seconds parse_radius_google(uint64_t radius_val);
+    std::chrono::seconds parse_radius_ietf(uint64_t radius_val);
+    std::chrono::seconds parse_radius(Version version, uint64_t radius_val);
+
+    // Encode radius to wire format
+    uint64_t encode_radius_google(std::chrono::seconds radius);
+    uint64_t encode_radius_ietf(std::chrono::seconds radius);
+    uint64_t encode_radius(Version version, std::chrono::seconds radius);
+
+    // Certificate context strings (version-specific)
+    const char* cert_context_string(Version version);
+    const char* response_context_string(Version version);
+} // namespace timestamp
+
 // Encode a message into wire format
 std::vector<uint8_t> encode(const Message& msg);
 
@@ -106,7 +142,7 @@ std::optional<Request> create_request(
 // Reply verification result
 struct VerifiedReply {
     std::chrono::system_clock::time_point midpoint;
-    std::chrono::microseconds radius;
+    std::chrono::seconds radius;  // Changed to seconds for draft-14 alignment
 };
 
 // Verify a Roughtime reply

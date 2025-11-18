@@ -160,8 +160,8 @@ private:
 
         // Sign SREP properly
         std::vector<uint8_t> to_sign;
-        to_sign.insert(to_sign.end(), "RoughTime v1 response signature",
-                      "RoughTime v1 response signature" + 32);
+        const char* resp_context = "RoughTime v1 response signature\x00";
+        to_sign.insert(to_sign.end(), resp_context, resp_context + 32);
         to_sign.insert(to_sign.end(), srep_bytes.begin(), srep_bytes.end());
 
         std::array<uint8_t, 64> signature;
@@ -185,8 +185,8 @@ private:
         auto dele_bytes = encode(dele);
 
         std::vector<uint8_t> cert_to_sign;
-        cert_to_sign.insert(cert_to_sign.end(), "RoughTime v1 delegation signature--",
-                           "RoughTime v1 delegation signature--" + 36);
+        const char* cert_context = "RoughTime v1 delegation signature--\x00";
+        cert_to_sign.insert(cert_to_sign.end(), cert_context, cert_context + 36);
         cert_to_sign.insert(cert_to_sign.end(), dele_bytes.begin(), dele_bytes.end());
 
         std::array<uint8_t, 64> cert_sig;
@@ -303,8 +303,8 @@ private:
         auto srep_bytes = encode(srep);
 
         std::vector<uint8_t> to_sign;
-        to_sign.insert(to_sign.end(), "RoughTime v1 response signature",
-                      "RoughTime v1 response signature" + 32);
+        const char* resp_context = "RoughTime v1 response signature\x00";
+        to_sign.insert(to_sign.end(), resp_context, resp_context + 32);
         to_sign.insert(to_sign.end(), srep_bytes.begin(), srep_bytes.end());
 
         std::array<uint8_t, 64> signature;
@@ -323,8 +323,8 @@ private:
         auto dele_bytes = encode(dele);
 
         std::vector<uint8_t> cert_to_sign;
-        cert_to_sign.insert(cert_to_sign.end(), "RoughTime v1 delegation signature--",
-                           "RoughTime v1 delegation signature--" + 36);
+        const char* cert_context = "RoughTime v1 delegation signature--\x00";
+        cert_to_sign.insert(cert_to_sign.end(), cert_context, cert_context + 36);
         cert_to_sign.insert(cert_to_sign.end(), dele_bytes.begin(), dele_bytes.end());
 
         std::array<uint8_t, 64> cert_sig;
@@ -504,8 +504,8 @@ private:
         auto srep_bytes = encode(srep);
 
         std::vector<uint8_t> to_sign;
-        to_sign.insert(to_sign.end(), "RoughTime v1 response signature",
-                      "RoughTime v1 response signature" + 32);
+        const char* resp_context = "RoughTime v1 response signature\x00";
+        to_sign.insert(to_sign.end(), resp_context, resp_context + 32);
         to_sign.insert(to_sign.end(), srep_bytes.begin(), srep_bytes.end());
 
         std::array<uint8_t, 64> signature;
@@ -525,8 +525,8 @@ private:
         auto dele_bytes = encode(dele);
 
         std::vector<uint8_t> cert_to_sign;
-        cert_to_sign.insert(cert_to_sign.end(), "RoughTime v1 delegation signature--",
-                           "RoughTime v1 delegation signature--" + 36);
+        const char* cert_context = "RoughTime v1 delegation signature--\x00";
+        cert_to_sign.insert(cert_to_sign.end(), cert_context, cert_context + 36);
         cert_to_sign.insert(cert_to_sign.end(), dele_bytes.begin(), dele_bytes.end());
 
         std::array<uint8_t, 64> cert_sig;
@@ -654,8 +654,8 @@ private:
         auto srep_bytes = encode(srep);
 
         std::vector<uint8_t> to_sign;
-        to_sign.insert(to_sign.end(), "RoughTime v1 response signature",
-                      "RoughTime v1 response signature" + 32);
+        const char* resp_context = "RoughTime v1 response signature\x00";
+        to_sign.insert(to_sign.end(), resp_context, resp_context + 32);
         to_sign.insert(to_sign.end(), srep_bytes.begin(), srep_bytes.end());
 
         std::array<uint8_t, 64> signature;
@@ -674,8 +674,8 @@ private:
         auto dele_bytes = encode(dele);
 
         std::vector<uint8_t> cert_to_sign;
-        cert_to_sign.insert(cert_to_sign.end(), "RoughTime v1 delegation signature--",
-                           "RoughTime v1 delegation signature--" + 36);
+        const char* cert_context = "RoughTime v1 delegation signature--\x00";
+        cert_to_sign.insert(cert_to_sign.end(), cert_context, cert_context + 36);
         cert_to_sign.insert(cert_to_sign.end(), dele_bytes.begin(), dele_bytes.end());
 
         std::array<uint8_t, 64> cert_sig;
@@ -705,158 +705,6 @@ private:
     std::array<uint8_t, 32> online_public_;
     std::array<uint8_t, 64> online_private_;
 };
-
-// Rogue server that sends wrong time (far in future)
-class WrongTimeServer {
-public:
-    WrongTimeServer(uint16_t port, int64_t time_offset_seconds)
-        : port_(port), time_offset_seconds_(time_offset_seconds), running_(false) {
-        ed25519_keypair(root_public_, root_private_);
-        ed25519_keypair(online_public_, online_private_);
-    }
-
-    void start() {
-        running_ = true;
-        thread_ = std::thread([this]() { run(); });
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-
-    void stop() {
-        running_ = false;
-        if (thread_.joinable()) {
-            thread_.join();
-        }
-    }
-
-    std::array<uint8_t, 32> root_public() const { return root_public_; }
-
-private:
-    void run() {
-        int sock = socket(AF_INET, SOCK_DGRAM, 0);
-        if (sock < 0) return;
-
-        int reuse = 1;
-        setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
-
-        struct timeval tv;
-        tv.tv_sec = 0;
-        tv.tv_usec = 200000;
-        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
-        struct sockaddr_in addr;
-        memset(&addr, 0, sizeof(addr));
-        addr.sin_family = AF_INET;
-        addr.sin_port = htons(port_);
-        inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
-
-        if (bind(sock, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
-            close(sock);
-            return;
-        }
-
-        std::vector<uint8_t> buffer(2048);
-        while (running_) {
-            struct sockaddr_in client_addr;
-            socklen_t client_len = sizeof(client_addr);
-
-            ssize_t len = recvfrom(sock, buffer.data(), buffer.size(), 0,
-                                  reinterpret_cast<struct sockaddr*>(&client_addr), &client_len);
-
-            if (len < 0) {
-                if (errno == EAGAIN || errno == EWOULDBLOCK) continue;
-                break;
-            }
-
-            auto response = create_wrong_time_response(
-                std::vector<uint8_t>(buffer.begin(), buffer.begin() + len));
-
-            sendto(sock, response.data(), response.size(), 0,
-                  reinterpret_cast<struct sockaddr*>(&client_addr), client_len);
-        }
-
-        close(sock);
-    }
-
-    std::vector<uint8_t> create_wrong_time_response(const std::vector<uint8_t>& request) {
-        auto framed = decode_framed(request);
-        if (!framed) return {};
-
-        auto req_msg = decode(framed->data);
-        if (!req_msg) return {};
-
-        auto nonc_it = req_msg->find(tags::NONC);
-        if (nonc_it == req_msg->end()) return {};
-
-        std::vector<uint8_t> nonce = nonc_it->second;
-
-        Message srep;
-        std::vector<uint8_t> midp(8), radi(4);
-        // WRONG TIME - offset by time_offset_seconds_
-        RogueServerHelper::write_le64(midp.data(), RogueServerHelper::unix_to_mjd_timestamp(std::time(nullptr) + time_offset_seconds_));
-        RogueServerHelper::write_le32(radi.data(), 1);
-
-        auto leaf_hash = crypto::MerkleTree::hash_leaf(nonce, 32);
-        srep[tags::MIDP] = midp;
-        srep[tags::RADI] = radi;
-        srep[tags::ROOT] = std::vector<uint8_t>(leaf_hash.begin(), leaf_hash.begin() + 32);
-
-        auto srep_bytes = encode(srep);
-
-        std::vector<uint8_t> to_sign;
-        to_sign.insert(to_sign.end(), "RoughTime v1 response signature",
-                      "RoughTime v1 response signature" + 32);
-        to_sign.insert(to_sign.end(), srep_bytes.begin(), srep_bytes.end());
-
-        std::array<uint8_t, 64> signature;
-        ed25519_sign(signature, to_sign.data(), to_sign.size(), online_private_.data());
-
-        Message dele;
-        dele[tags::PUBK] = std::vector<uint8_t>(online_public_.begin(), online_public_.end());
-
-        // Certificate must be valid around the FAKE time the server claims
-        auto fake_time = std::time(nullptr) + time_offset_seconds_;
-        std::vector<uint8_t> mint(8), maxt(8);
-        RogueServerHelper::write_le64(mint.data(), RogueServerHelper::unix_to_mjd_timestamp(fake_time - 86400)); // Valid from 1 day before fake time
-        RogueServerHelper::write_le64(maxt.data(), RogueServerHelper::unix_to_mjd_timestamp(fake_time + 86400)); // Valid until 1 day after fake time
-        dele[tags::MINT] = mint;
-        dele[tags::MAXT] = maxt;
-
-        auto dele_bytes = encode(dele);
-
-        std::vector<uint8_t> cert_to_sign;
-        cert_to_sign.insert(cert_to_sign.end(), "RoughTime v1 delegation signature--",
-                           "RoughTime v1 delegation signature--" + 36);
-        cert_to_sign.insert(cert_to_sign.end(), dele_bytes.begin(), dele_bytes.end());
-
-        std::array<uint8_t, 64> cert_sig;
-        ed25519_sign(cert_sig, cert_to_sign.data(), cert_to_sign.size(), root_private_.data());
-
-        Message cert;
-        cert[tags::DELE] = dele_bytes;
-        cert[tags::SIG] = std::vector<uint8_t>(cert_sig.begin(), cert_sig.end());
-
-        Message reply;
-        reply[tags::SREP] = srep_bytes;
-        reply[tags::SIG] = std::vector<uint8_t>(signature.begin(), signature.end());
-        reply[tags::CERT] = encode(cert);
-        reply[tags::VER] = {0x08, 0x00, 0x00, 0x80};
-        reply[tags::NONC] = nonce;
-        reply[tags::INDX] = {0x00, 0x00, 0x00, 0x00};
-        reply[tags::PATH] = {};
-
-        return encode_framed(true, encode(reply));
-    }
-
-    uint16_t port_;
-    int64_t time_offset_seconds_;
-    std::atomic<bool> running_;
-    std::thread thread_;
-    std::array<uint8_t, 32> root_public_;
-    std::array<uint8_t, 64> root_private_;
-    std::array<uint8_t, 32> online_public_;
-    std::array<uint8_t, 64> online_private_;
-};
-
 TEST_F(RogueServerTest, RejectExpiredCertificate) {
     ExpiredCertServer rogue(25003);
     rogue.start();
@@ -905,18 +753,10 @@ TEST_F(RogueServerTest, RejectInvalidMerkleProof) {
 
 TEST_F(RogueServerTest, RejectTimeWayOutOfBounds) {
     // Server claiming time is 100 years in future
-    WrongTimeServer rogue(25005, 100LL * 365 * 86400);
-    rogue.start();
+    GoodServer rogue(25005, std::chrono::seconds(100LL * 365 * 86400));
 
-    Server srv;
+    Server srv = rogue.get_client_config();
     srv.name = "wrong-time-server";
-    srv.version = "IETF-Roughtime";
-    srv.public_key = rogue.root_public();
-
-    ServerAddress addr;
-    addr.protocol = "udp";
-    addr.address = "127.0.0.1:25005";
-    srv.addresses = {addr};
 
     Client client;
     auto result = client.query(srv, 3, std::chrono::milliseconds(1000), std::nullopt);
@@ -929,8 +769,6 @@ TEST_F(RogueServerTest, RejectTimeWayOutOfBounds) {
         // Time should be way off (> 1 year)
         ASSERT_GT(std::abs(diff), 365 * 86400);
     }
-
-    rogue.stop();
 }
 
 // Multi-server tests with mixed good and rogue servers
@@ -942,7 +780,7 @@ struct GoodServer {
     std::thread thread;
     uint16_t port;
 
-    GoodServer(uint16_t p) : port(p) {
+    GoodServer(uint16_t p, std::chrono::seconds time_offset = std::chrono::seconds(0)) : port(p) {
         root_keypair = server::keygen::generate_keypair();
 
         server::ServerConfig config;
@@ -951,6 +789,7 @@ struct GoodServer {
         config.root_private_key = root_keypair.private_key;
         config.radius = std::chrono::seconds(1);
         config.cert_validity = std::chrono::hours(48);
+        config.time_offset = time_offset;  // Apply time offset (0 = real time)
 
         server = std::make_unique<server::Server>(config);
         thread = std::thread([this]() {
@@ -988,20 +827,13 @@ TEST_F(RogueServerTest, OneGoodOneBadTimeCannotEstablishTrust) {
     // Real attack: Both servers cryptographically valid, but one lies about time
     // With 1 vs 1, we CANNOT determine which server is honest
     GoodServer good(26001);
-    WrongTimeServer bad(26002, 7 * 86400); // Claims +7 days
-    bad.start();
+    GoodServer bad(26002, std::chrono::seconds(7 * 86400)); // Claims +7 days
 
     std::vector<Server> servers;
     servers.push_back(good.get_client_config());
 
-    Server bad_srv;
+    Server bad_srv = bad.get_client_config();
     bad_srv.name = "time-liar";
-    bad_srv.version = "IETF-Roughtime";
-    bad_srv.public_key = bad.root_public();
-    ServerAddress bad_addr;
-    bad_addr.protocol = "udp";
-    bad_addr.address = "127.0.0.1:26002";
-    bad_srv.addresses = {bad_addr};
     servers.push_back(bad_srv);
 
     Client client;
@@ -1027,7 +859,7 @@ TEST_F(RogueServerTest, OneGoodOneBadTimeCannotEstablishTrust) {
     auto median_result = calculate_median_delta(
         results,
         now,
-        std::chrono::microseconds(10000000)
+        std::chrono::seconds(10)
     );
 
     ASSERT_TRUE(median_result.has_value());
@@ -1036,8 +868,6 @@ TEST_F(RogueServerTest, OneGoodOneBadTimeCannotEstablishTrust) {
     // CRITICAL: Application MUST NOT trust time with only 2 servers
     // Need at least 3 to establish consensus
     ASSERT_LT(median_result->valid_count, 3) << "Insufficient servers - cannot establish trust";
-
-    bad.stop();
 }
 
 TEST_F(RogueServerTest, ThreeGoodTwoBadTime) {
@@ -1045,35 +875,20 @@ TEST_F(RogueServerTest, ThreeGoodTwoBadTime) {
     GoodServer good1(27001);
     GoodServer good2(27002);
     GoodServer good3(27003);
-    WrongTimeServer rogue1(27004, 365 * 86400);   // +1 year
-    WrongTimeServer rogue2(27005, -365 * 86400);  // -1 year
-
-    rogue1.start();
-    rogue2.start();
+    GoodServer rogue1(27004, std::chrono::seconds(365 * 86400));   // +1 year
+    GoodServer rogue2(27005, std::chrono::seconds(-365 * 86400));  // -1 year
 
     std::vector<Server> servers;
     servers.push_back(good1.get_client_config());
     servers.push_back(good2.get_client_config());
     servers.push_back(good3.get_client_config());
 
-    Server rogue1_srv;
+    Server rogue1_srv = rogue1.get_client_config();
     rogue1_srv.name = "future-server";
-    rogue1_srv.version = "IETF-Roughtime";
-    rogue1_srv.public_key = rogue1.root_public();
-    ServerAddress rogue1_addr;
-    rogue1_addr.protocol = "udp";
-    rogue1_addr.address = "127.0.0.1:27004";
-    rogue1_srv.addresses = {rogue1_addr};
     servers.push_back(rogue1_srv);
 
-    Server rogue2_srv;
+    Server rogue2_srv = rogue2.get_client_config();
     rogue2_srv.name = "past-server";
-    rogue2_srv.version = "IETF-Roughtime";
-    rogue2_srv.public_key = rogue2.root_public();
-    ServerAddress rogue2_addr;
-    rogue2_addr.protocol = "udp";
-    rogue2_addr.address = "127.0.0.1:27005";
-    rogue2_srv.addresses = {rogue2_addr};
     servers.push_back(rogue2_srv);
 
     Client client;
@@ -1112,7 +927,7 @@ TEST_F(RogueServerTest, ThreeGoodTwoBadTime) {
     auto median_result = calculate_median_delta(
         results,
         now,
-        std::chrono::microseconds(10000000) // 10 second threshold
+        std::chrono::seconds(10) // 10 second threshold
     );
 
     ASSERT_TRUE(median_result.has_value());
@@ -1122,9 +937,6 @@ TEST_F(RogueServerTest, ThreeGoodTwoBadTime) {
     // Median should still be close to good servers' time (median is outlier-resistant)
     // With 3 good + 2 rogue, median will be one of the good values
     ASSERT_LT(std::abs(median_result->delta.count()), 10000); // < 10 seconds
-
-    rogue1.stop();
-    rogue2.stop();
 }
 
 TEST_F(RogueServerTest, MedianDetectsColludingServers) {
@@ -1136,35 +948,20 @@ TEST_F(RogueServerTest, MedianDetectsColludingServers) {
     GoodServer good3(28003);
 
     // Two colluding servers both claim +30 days
-    WrongTimeServer collude1(28004, 30 * 86400);
-    WrongTimeServer collude2(28005, 30 * 86400);
-
-    collude1.start();
-    collude2.start();
+    GoodServer collude1(28004, std::chrono::seconds(30 * 86400));
+    GoodServer collude2(28005, std::chrono::seconds(30 * 86400));
 
     std::vector<Server> servers;
     servers.push_back(good1.get_client_config());
     servers.push_back(good2.get_client_config());
     servers.push_back(good3.get_client_config());
 
-    Server col1_srv;
+    Server col1_srv = collude1.get_client_config();
     col1_srv.name = "colluder1";
-    col1_srv.version = "IETF-Roughtime";
-    col1_srv.public_key = collude1.root_public();
-    ServerAddress col1_addr;
-    col1_addr.protocol = "udp";
-    col1_addr.address = "127.0.0.1:28004";
-    col1_srv.addresses = {col1_addr};
     servers.push_back(col1_srv);
 
-    Server col2_srv;
+    Server col2_srv = collude2.get_client_config();
     col2_srv.name = "colluder2";
-    col2_srv.version = "IETF-Roughtime";
-    col2_srv.public_key = collude2.root_public();
-    ServerAddress col2_addr;
-    col2_addr.protocol = "udp";
-    col2_addr.address = "127.0.0.1:28005";
-    col2_srv.addresses = {col2_addr};
     servers.push_back(col2_srv);
 
     Client client;
@@ -1191,7 +988,7 @@ TEST_F(RogueServerTest, MedianDetectsColludingServers) {
     auto median_result = calculate_median_delta(
         results,
         now,
-        std::chrono::microseconds(5000000) // 5 second threshold
+        std::chrono::seconds(5) // 5 second threshold
     );
 
     ASSERT_TRUE(median_result.has_value());
@@ -1200,9 +997,6 @@ TEST_F(RogueServerTest, MedianDetectsColludingServers) {
 
     // Median is outlier-resistant: with 3 honest + 2 colluders, median is honest value
     ASSERT_LT(std::abs(median_result->delta.count()), 10000); // < 10 seconds
-
-    collude1.stop();
-    collude2.stop();
 }
 
 TEST_F(RogueServerTest, TrustedTimeAPIRequiresMinimumServers) {
@@ -1252,46 +1046,24 @@ TEST_F(RogueServerTest, TrustedTimeAPIRejectsMajorityRogue) {
 
     GoodServer good1(30001);
     GoodServer good2(30002);
-    WrongTimeServer rogue1(30003, 365 * 86400);  // +1 year
-    WrongTimeServer rogue2(30004, 365 * 86400);  // +1 year
-    WrongTimeServer rogue3(30005, 365 * 86400);  // +1 year
-
-    rogue1.start();
-    rogue2.start();
-    rogue3.start();
+    GoodServer rogue1(30003, std::chrono::seconds(365 * 86400));  // +1 year
+    GoodServer rogue2(30004, std::chrono::seconds(365 * 86400));  // +1 year
+    GoodServer rogue3(30005, std::chrono::seconds(365 * 86400));  // +1 year
 
     std::vector<Server> servers;
     servers.push_back(good1.get_client_config());
     servers.push_back(good2.get_client_config());
 
-    Server rogue1_srv;
+    Server rogue1_srv = rogue1.get_client_config();
     rogue1_srv.name = "rogue1";
-    rogue1_srv.version = "IETF-Roughtime";
-    rogue1_srv.public_key = rogue1.root_public();
-    ServerAddress r1_addr;
-    r1_addr.protocol = "udp";
-    r1_addr.address = "127.0.0.1:30003";
-    rogue1_srv.addresses = {r1_addr};
     servers.push_back(rogue1_srv);
 
-    Server rogue2_srv;
+    Server rogue2_srv = rogue2.get_client_config();
     rogue2_srv.name = "rogue2";
-    rogue2_srv.version = "IETF-Roughtime";
-    rogue2_srv.public_key = rogue2.root_public();
-    ServerAddress r2_addr;
-    r2_addr.protocol = "udp";
-    r2_addr.address = "127.0.0.1:30004";
-    rogue2_srv.addresses = {r2_addr};
     servers.push_back(rogue2_srv);
 
-    Server rogue3_srv;
+    Server rogue3_srv = rogue3.get_client_config();
     rogue3_srv.name = "rogue3";
-    rogue3_srv.version = "IETF-Roughtime";
-    rogue3_srv.public_key = rogue3.root_public();
-    ServerAddress r3_addr;
-    r3_addr.protocol = "udp";
-    r3_addr.address = "127.0.0.1:30005";
-    rogue3_srv.addresses = {r3_addr};
     servers.push_back(rogue3_srv);
 
     Client client;
@@ -1311,8 +1083,4 @@ TEST_F(RogueServerTest, TrustedTimeAPIRejectsMajorityRogue) {
     // This demonstrates that even with is_trusted()=true, you need
     // to trust the OPERATORS of the servers, not just have 3+ responses
     ASSERT_GT(diff, 300 * 86400); // Time is way off
-
-    rogue1.stop();
-    rogue2.stop();
-    rogue3.stop();
 }

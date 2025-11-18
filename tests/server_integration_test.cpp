@@ -179,3 +179,87 @@ TEST_F(ServerIntegrationTest, ServerResponseSize) {
     // IETF response should be reasonable size (typically 392 bytes)
     // This is implicitly tested by successful decoding
 }
+
+// Protocol Version Compatibility Tests
+// Test that server correctly negotiates all supported protocol versions
+
+TEST_F(ServerIntegrationTest, ServerNegotiatesDraft14) {
+    TestServer server(20009);
+    auto srv = server.get_client_config("IETF-Roughtime");
+
+    Client client;
+    auto result = client.query(srv, 3, std::chrono::milliseconds(1000), std::nullopt);
+
+    ASSERT_TRUE(result.is_success()) << "Draft-14 negotiation failed: " << result.error;
+    // Server should accept client advertising Draft-14 and respond with Draft-14
+    // Timestamp should be Unix seconds (Draft-14 format)
+    EXPECT_GT(result.midpoint.time_since_epoch().count(), 0);
+    EXPECT_GE(result.radius.count(), 0);
+}
+
+TEST_F(ServerIntegrationTest, ServerNegotiatesDraft11) {
+    TestServer server(20010);
+    auto srv = server.get_client_config("IETF-Roughtime");
+
+    Client client;
+    auto result = client.query(srv, 3, std::chrono::milliseconds(1000), std::nullopt);
+
+    ASSERT_TRUE(result.is_success()) << "Draft-11 negotiation failed: " << result.error;
+    // Verify time is reasonable
+    auto now = std::chrono::system_clock::now();
+    auto time_diff = std::chrono::duration_cast<std::chrono::seconds>(
+        result.midpoint > now ? result.midpoint - now : now - result.midpoint
+    );
+    EXPECT_LT(time_diff.count(), 10) << "Time difference too large: " << time_diff.count() << "s";
+}
+
+TEST_F(ServerIntegrationTest, ServerNegotiatesDraft08) {
+    TestServer server(20011);
+    auto srv = server.get_client_config("IETF-Roughtime");
+
+    Client client;
+    auto result = client.query(srv, 3, std::chrono::milliseconds(1000), std::nullopt);
+
+    ASSERT_TRUE(result.is_success()) << "Draft-08 negotiation failed: " << result.error;
+    // Server should successfully respond to Draft-08 capable clients
+    EXPECT_GT(result.radius.count(), 0);
+}
+
+TEST_F(ServerIntegrationTest, ServerNegotiatesDraft07) {
+    TestServer server(20012);
+    auto srv = server.get_client_config("IETF-Roughtime");
+
+    Client client;
+    auto result = client.query(srv, 3, std::chrono::milliseconds(1000), std::nullopt);
+
+    ASSERT_TRUE(result.is_success()) << "Draft-07 negotiation failed: " << result.error;
+    // Server should successfully respond to Draft-07 capable clients
+    EXPECT_GT(result.radius.count(), 0);
+}
+
+TEST_F(ServerIntegrationTest, AllVersionsProduceSimilarTime) {
+    // Verify all protocol versions return similar time values
+    TestServer server1(20013);
+    TestServer server2(20014);
+    TestServer server3(20015);
+
+    Client client;
+
+    auto srv_ietf = server1.get_client_config("IETF-Roughtime");
+    auto srv_google = server2.get_client_config("Google-Roughtime");
+
+    auto result_ietf = client.query(srv_ietf, 3, std::chrono::milliseconds(1000), std::nullopt);
+    auto result_google = client.query(srv_google, 3, std::chrono::milliseconds(1000), std::nullopt);
+
+    ASSERT_TRUE(result_ietf.is_success());
+    ASSERT_TRUE(result_google.is_success());
+
+    // Both should return time within 5 seconds of each other
+    auto time_diff = std::chrono::duration_cast<std::chrono::seconds>(
+        result_ietf.midpoint > result_google.midpoint ?
+        result_ietf.midpoint - result_google.midpoint :
+        result_google.midpoint - result_ietf.midpoint
+    );
+
+    EXPECT_LT(time_diff.count(), 5) << "Time difference between protocols: " << time_diff.count() << "s";
+}

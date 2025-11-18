@@ -62,6 +62,28 @@ private:
     int fd_;
 };
 
+// Encode byte vector to base64 string
+inline std::string encode_base64(const uint8_t* data, size_t len) {
+    static const char base64_chars[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    std::string result;
+    result.reserve(((len + 2) / 3) * 4);
+
+    for (size_t i = 0; i < len; i += 3) {
+        uint32_t val = static_cast<uint32_t>(data[i]) << 16;
+        if (i + 1 < len) val |= static_cast<uint32_t>(data[i + 1]) << 8;
+        if (i + 2 < len) val |= static_cast<uint32_t>(data[i + 2]);
+
+        result.push_back(base64_chars[(val >> 18) & 0x3F]);
+        result.push_back(base64_chars[(val >> 12) & 0x3F]);
+        result.push_back((i + 1 < len) ? base64_chars[(val >> 6) & 0x3F] : '=');
+        result.push_back((i + 2 < len) ? base64_chars[val & 0x3F] : '=');
+    }
+
+    return result;
+}
+
 // Decode base64 string to byte vector
 // Returns std::nullopt if input is invalid
 inline std::optional<std::vector<uint8_t>> decode_base64(const std::string& input) {

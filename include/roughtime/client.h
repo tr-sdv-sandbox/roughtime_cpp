@@ -21,7 +21,7 @@ struct QueryResult {
     std::vector<uint8_t> blind;
     std::vector<uint8_t> response;
     std::chrono::system_clock::time_point midpoint;
-    std::chrono::microseconds radius;
+    std::chrono::seconds radius;  // Changed to seconds for draft-14 alignment
     std::chrono::milliseconds network_delay;
     const Server* server;
     std::string error;
@@ -32,7 +32,7 @@ struct QueryResult {
 // Result of querying multiple servers for trusted time
 struct TrustedTimeResult {
     std::chrono::system_clock::time_point time;
-    std::chrono::microseconds uncertainty;
+    std::chrono::seconds uncertainty;  // Changed to seconds for draft-14 alignment
     size_t agreeing_servers;
     size_t total_queried;
     std::vector<QueryResult> all_results;
@@ -100,7 +100,7 @@ public:
         size_t min_servers = 3,
         int attempts = 3,
         std::chrono::milliseconds timeout = std::chrono::milliseconds(1000),
-        std::chrono::microseconds radius_threshold = std::chrono::microseconds(10000000)
+        std::chrono::seconds radius_threshold = std::chrono::seconds(10)
     );
 
 private:
@@ -117,7 +117,7 @@ struct MedianDeltaResult {
 std::optional<MedianDeltaResult> calculate_median_delta(
     const std::vector<QueryResult>& results,
     std::chrono::system_clock::time_point reference_time,
-    std::chrono::microseconds radius_threshold
+    std::chrono::seconds radius_threshold
 );
 
 } // namespace roughtime

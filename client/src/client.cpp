@@ -33,14 +33,15 @@ public:
         // Determine version preference
         std::vector<Version> version_pref;
         if (server.version == "IETF-Roughtime" || server.version.empty()) {
-            version_pref = {Version::Draft11, Version::Draft08, Version::Draft07};
-            LOG(INFO) << "Using IETF-Roughtime protocol";
+            // Prefer newest drafts first
+            version_pref = {Version::Draft14, Version::Draft11, Version::Draft08, Version::Draft07};
+            LOG(INFO) << "Using IETF-Roughtime protocol (advertising Draft-14, 11, 08, 07)";
         } else if (server.version == "Google-Roughtime") {
             version_pref = {Version::Google};
             LOG(INFO) << "Using Google-Roughtime protocol";
         } else {
             result.error = "Unknown version: " + server.version;
-            LOG(ERROR) << "Unknown version: " << server.version;
+            LOG(ERROR) << "Unknown version: " + server.version;
             return result;
         }
 
@@ -212,7 +213,7 @@ std::vector<QueryResult> Client::query_servers(
 std::optional<MedianDeltaResult> calculate_median_delta(
     const std::vector<QueryResult>& results,
     std::chrono::system_clock::time_point reference_time,
-    std::chrono::microseconds radius_threshold
+    std::chrono::seconds radius_threshold
 ) {
     if (results.empty()) {
         return std::nullopt;
@@ -254,7 +255,7 @@ TrustedTimeResult Client::query_for_trusted_time(
     size_t min_servers,
     int attempts,
     std::chrono::milliseconds timeout,
-    std::chrono::microseconds radius_threshold
+    std::chrono::seconds radius_threshold
 ) {
     TrustedTimeResult result;
     result.total_queried = servers.size();
@@ -307,7 +308,7 @@ TrustedTimeResult Client::query_for_trusted_time(
     result.time = reference + median_result->delta;
 
     // Calculate uncertainty as the maximum radius among agreeing servers
-    std::chrono::microseconds max_radius{0};
+    std::chrono::seconds max_radius{0};
     for (const auto& r : successful) {
         if (r.radius > max_radius) {
             max_radius = r.radius;

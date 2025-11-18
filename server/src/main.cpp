@@ -5,6 +5,7 @@
 
 #include "roughtime/server.h"
 #include <roughtime/crypto.h>
+#include <roughtime/util.h>
 #include <glog/logging.h>
 #include <getopt.h>
 #include <iostream>
@@ -45,7 +46,7 @@ namespace {
 
     void print_version() {
         std::cout << "Roughtime Server v1.0.0\n";
-        std::cout << "IETF Roughtime Draft 08/11 + Google-Roughtime\n";
+        std::cout << "IETF Roughtime Draft 07/08/11/14 + Google-Roughtime\n";
         std::cout << "Copyright 2024 - Apache License 2.0\n";
     }
 
@@ -67,7 +68,9 @@ namespace {
             }
             std::cout << std::dec << "\n";
 
-            std::cout << "Root public key: ";
+            std::cout << "Root public key (base64): "
+                      << util::encode_base64(kp.public_key.data(), kp.public_key.size()) << "\n";
+            std::cout << "Root public key (hex):    ";
             for (auto b : kp.public_key) {
                 std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b);
             }
@@ -92,7 +95,9 @@ namespace {
             root_private_key = kp.private_key;
 
             LOG(INFO) << "Loaded root key from seed";
-            std::cout << "Root public key: ";
+            std::cout << "Root public key (base64): "
+                      << util::encode_base64(kp.public_key.data(), kp.public_key.size()) << "\n";
+            std::cout << "Root public key (hex):    ";
             for (auto b : kp.public_key) {
                 std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b);
             }
