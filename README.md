@@ -1,12 +1,15 @@
 # Roughtime C++
 
-A modern C++17 implementation of the Roughtime protocol, based on Cloudflare's Go implementation. This implementation includes both a high-performance server and full-featured client supporting Google-Roughtime and IETF-Roughtime protocols.
+[![CI](https://github.com/tr-sdv-sandbox/roughtime_cpp/actions/workflows/ci.yml/badge.svg)](https://github.com/tr-sdv-sandbox/roughtime_cpp/actions/workflows/ci.yml)
+
+A modern C++17 implementation of the Roughtime protocol, based on Cloudflare's Go implementation. This implementation includes both a high-performance server and full-featured client supporting Google-Roughtime and IETF-Roughtime protocols (draft-07, draft-08, draft-11, and draft-14).
 
 ## Features
 
 ### Client
 - ✅ Full support for Google-Roughtime protocol
-- ✅ Full support for IETF-Roughtime (draft-07, draft-08, draft-11)
+- ✅ Full support for IETF-Roughtime (draft-07, draft-08, draft-11, draft-14)
+- ✅ Automatic protocol version negotiation (prefers draft-14)
 - ✅ Ed25519 signature verification
 - ✅ Merkle tree verification
 - ✅ Request chaining
@@ -17,17 +20,21 @@ A modern C++17 implementation of the Roughtime protocol, based on Cloudflare's G
 
 ### Server
 - ✅ High-performance UDP server (10,000+ req/s)
-- ✅ Automatic protocol version negotiation
+- ✅ Automatic protocol version negotiation (supports draft-07/08/11/14)
 - ✅ Support for both Google-Roughtime and IETF-Roughtime
 - ✅ Certificate delegation with automatic rotation
 - ✅ Sub-millisecond average latency
-- ✅ Comprehensive test suite with 64 tests
+- ✅ Comprehensive test suite with 77 tests
+- ✅ GitHub Actions CI with sanitizer checks (ASan, UBSan)
 
 ### Cryptography
 - ✅ SHA-512/256 (FIPS 180-4) for IETF Roughtime
 - ✅ SHA-512 for Google Roughtime
 - ✅ Ed25519 signatures with OpenSSL
-- ✅ Modified Julian Date (MJD) timestamp format for IETF
+- ✅ Multiple timestamp formats:
+  - Modified Julian Date (MJD) for draft-07/08/11
+  - Unix seconds for draft-14
+  - Unix microseconds for Google-Roughtime
 - ✅ Modern C++17 code with proper error handling
 
 ## Requirements
@@ -173,7 +180,8 @@ Options:
   -c, --config FILE      JSON configuration file with server list
   -p, --ping ADDR        Ping a single server (e.g., localhost:2002)
   -k, --pubkey KEY       Base64-encoded Ed25519 public key for ping
-  -v, --ping-version VER Version for ping (IETF-Roughtime or Google-Roughtime)
+  -v, --ping-version VER Version for ping (default: IETF-Roughtime)
+                         Options: IETF-Roughtime (prefers draft-14), Google-Roughtime
   -a, --attempts NUM     Number of query attempts per server (default: 3)
   -t, --timeout MS       Timeout in milliseconds (default: 1000)
   -V, --version          Print version and exit
@@ -253,7 +261,7 @@ int main() {
         if (result.is_success()) {
             std::cout << result.server->name << ": "
                      << "Midpoint: " << /* format time */
-                     << " ±" << result.radius.count() << "µs\n";
+                     << " ±" << result.radius.count() << "s\n";
         } else {
             std::cerr << "Error: " << result.error << "\n";
         }
@@ -282,30 +290,34 @@ The original Roughtime protocol as specified by Google:
 
 ### IETF-Roughtime
 
-The IETF standardized version of Roughtime (drafts 07, 08, and 11):
+The IETF standardized version of Roughtime (drafts 07, 08, 11, and 14):
 - **Nonce Size**: 32 bytes
-- **Timestamp Format**: Modified Julian Date (MJD)
-  - Top 24 bits: Days since November 17, 1858
-  - Bottom 40 bits: Microseconds since midnight
-  - Unix epoch (Jan 1, 1970) = MJD 40587
+- **Timestamp Format**:
+  - **Draft-07/08/11**: Modified Julian Date (MJD)
+    - Top 24 bits: Days since November 17, 1858
+    - Bottom 40 bits: Microseconds since midnight
+    - Unix epoch (Jan 1, 1970) = MJD 40587
+  - **Draft-14**: Unix seconds since epoch (simplified format)
+- **Radius Precision**: Seconds (changed from microseconds in draft-14)
 - **Hash Algorithm**: SHA-512/256 per FIPS 180-4 (32 bytes)
 - **Merkle Tree**: 32-byte hashes
 - **Framing**: "ROUGHTIM" header
 - **Version Negotiation**: VER tag with supported versions
-- **Server Identification**: SRV tag (draft-11)
+- **Server Identification**: SRV tag (draft-11+)
 
 ### Key Differences
 
-| Feature | Google-Roughtime | IETF-Roughtime |
-|---------|-----------------|----------------|
-| Nonce Size | 64 bytes | 32 bytes |
-| Timestamp | Unix microseconds | Modified Julian Date (MJD) |
-| Hash Function | SHA-512 | SHA-512/256 (FIPS 180-4) |
-| Merkle Hash Size | 64 bytes | 32 bytes |
-| Framing | None | "ROUGHTIM" header |
-| Version Tag | Not used | VER tag |
-| Server Tag | Not used | SRV tag (draft-11) |
-| Cert Context | 36 bytes | 34 bytes (draft-07), 36 bytes (draft-08+) |
+| Feature | Google-Roughtime | IETF Draft-07/08/11 | IETF Draft-14 |
+|---------|-----------------|---------------------|---------------|
+| Nonce Size | 64 bytes | 32 bytes | 32 bytes |
+| Timestamp | Unix microseconds | MJD (days + μs) | Unix seconds |
+| Radius | Microseconds | Seconds | Seconds |
+| Hash Function | SHA-512 | SHA-512/256 | SHA-512/256 |
+| Merkle Hash Size | 64 bytes | 32 bytes | 32 bytes |
+| Framing | None | "ROUGHTIM" | "ROUGHTIM" |
+| Version Tag | Not used | VER tag | VER tag |
+| Server Tag | Not used | SRV tag (draft-11) | SRV tag |
+| Cert Context | 36 bytes (null-term) | 34/36 bytes (null-term) | 33 bytes (no null) |
 
 ## Security Considerations
 
@@ -317,7 +329,7 @@ The IETF standardized version of Roughtime (drafts 07, 08, and 11):
 
 ## Testing
 
-The project includes a comprehensive test suite with 64 tests covering:
+The project includes a comprehensive test suite with 77 tests covering:
 
 ### Unit Tests
 - **Protocol Tests** (16 tests): Message encoding/decoding, framing, version handling
@@ -325,9 +337,16 @@ The project includes a comprehensive test suite with 64 tests covering:
 
 ### Integration Tests
 - **Client Integration** (8 tests): Real server communication, retries, chaining
-- **Server Integration** (8 tests): Protocol support, signatures, Merkle proofs
-- **Rogue Server Tests** (10 tests): Security validation, attack resistance
+- **Server Integration** (13 tests): Protocol support (all drafts), signatures, Merkle proofs, version negotiation
+- **Rogue Server Tests** (10 tests): Security validation, attack resistance, multi-server consensus
+- **Security Tests** (8 tests): Input validation, buffer safety, cryptographic correctness
 - **Performance Tests** (7 tests): Throughput, latency, concurrency
+
+### Continuous Integration
+- **GitHub Actions CI**: Automated testing on every commit
+  - Ubuntu 24.04 with Debug and Release builds
+  - Sanitizer builds (ASan, UBSan) for memory leak detection
+  - All 77 tests must pass before merge
 
 ### Running Tests
 
@@ -395,8 +414,10 @@ limitations under the License.
 ## References
 
 - [Roughtime Protocol (Google)](https://roughtime.googlesource.com/roughtime/+/HEAD/PROTOCOL.md)
-- [draft-ietf-ntp-roughtime-07](https://datatracker.ietf.org/doc/html/draft-ietf-ntp-roughtime-07)
+- [draft-ietf-ntp-roughtime-14](https://datatracker.ietf.org/doc/html/draft-ietf-ntp-roughtime-14) (Latest - Active Internet-Draft)
 - [draft-ietf-ntp-roughtime-11](https://datatracker.ietf.org/doc/html/draft-ietf-ntp-roughtime-11)
+- [draft-ietf-ntp-roughtime-08](https://datatracker.ietf.org/doc/html/draft-ietf-ntp-roughtime-08)
+- [draft-ietf-ntp-roughtime-07](https://datatracker.ietf.org/doc/html/draft-ietf-ntp-roughtime-07)
 - [FIPS 180-4 (SHA-512/256)](https://csrc.nist.gov/publications/detail/fips/180/4/final)
 - [Cloudflare's Go Implementation](https://github.com/cloudflare/roughtime)
 - [Cloudflare Blog: Roughtime](https://blog.cloudflare.com/roughtime/)
