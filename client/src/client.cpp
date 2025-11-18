@@ -250,6 +250,70 @@ std::optional<MedianDeltaResult> calculate_median_delta(
     return MedianDeltaResult{median, deltas.size()};
 }
 
+std::string MalfeasanceReport::to_string() const {
+    std::ostringstream oss;
+    oss << "MALFEASANCE DETECTED:\n";
+    oss << "  Server " << server_i_index << " (" << server_i_name << ")\n";
+    oss << "    MIDP: " << std::chrono::duration_cast<std::chrono::seconds>(
+        midpoint_i.time_since_epoch()).count() << "s\n";
+    oss << "    RADI: " << radius_i.count() << "s\n";
+    oss << "    Lower bound: " << std::chrono::duration_cast<std::chrono::seconds>(
+        (midpoint_i - radius_i).time_since_epoch()).count() << "s\n";
+    oss << "  Server " << server_j_index << " (" << server_j_name << ")\n";
+    oss << "    MIDP: " << std::chrono::duration_cast<std::chrono::seconds>(
+        midpoint_j.time_since_epoch()).count() << "s\n";
+    oss << "    RADI: " << radius_j.count() << "s\n";
+    oss << "    Upper bound: " << std::chrono::duration_cast<std::chrono::seconds>(
+        (midpoint_j + radius_j).time_since_epoch()).count() << "s\n";
+    oss << "  Violation: MIDP_i - RADI_i > MIDP_j + RADI_j\n";
+    oss << "  (Earlier query's lower bound exceeds later query's upper bound)\n";
+    return oss.str();
+}
+
+std::optional<MalfeasanceReport> validate_causal_ordering(
+    const std::vector<QueryResult>& results
+) {
+    // Per RFC draft-ietf-ntp-roughtime 8.2:
+    // For each pair (i, j) where i received before j,
+    // must check: MIDP_i - RADI_i <= MIDP_j + RADI_j
+    //
+    // This ensures times are consistent with causal ordering.
+    // If this check fails, at least one server is lying.
+
+    for (size_t i = 0; i < results.size(); i++) {
+        if (!results[i].is_success()) continue;
+
+        for (size_t j = i + 1; j < results.size(); j++) {
+            if (!results[j].is_success()) continue;
+
+            auto lower_i = results[i].midpoint - results[i].radius;
+            auto upper_j = results[j].midpoint + results[j].radius;
+
+            if (lower_i > upper_j) {
+                // Causal ordering violation detected!
+                MalfeasanceReport report;
+                report.server_i_index = i;
+                report.server_j_index = j;
+                report.server_i_name = results[i].server ? results[i].server->name : "unknown";
+                report.server_j_name = results[j].server ? results[j].server->name : "unknown";
+                report.midpoint_i = results[i].midpoint;
+                report.midpoint_j = results[j].midpoint;
+                report.radius_i = results[i].radius;
+                report.radius_j = results[j].radius;
+                report.response_i = results[i].response;
+                report.response_j = results[j].response;
+
+                LOG(ERROR) << "Causal ordering violation detected:";
+                LOG(ERROR) << report.to_string();
+
+                return report;
+            }
+        }
+    }
+
+    return std::nullopt;
+}
+
 TrustedTimeResult Client::query_for_trusted_time(
     const std::vector<Server>& servers,
     size_t min_servers,
@@ -272,8 +336,56 @@ TrustedTimeResult Client::query_for_trusted_time(
         return result;
     }
 
-    // Query all servers
-    result.all_results = query_servers(servers, attempts, timeout);
+    // Per RFC 8.2: Query servers twice in same order (repeated measurement)
+    // This ensures all possible inconsistencies can be detected
+    LOG(INFO) << "Performing repeated measurement sequence (2 passes)";
+
+    // First pass
+    auto results_pass1 = query_servers(servers, attempts, timeout);
+
+    // Validate causal ordering for first pass
+    auto malfeasance1 = validate_causal_ordering(results_pass1);
+    if (malfeasance1) {
+        result.malfeasance = malfeasance1;
+        result.error = "Causal ordering violation detected in first pass";
+        result.all_results = results_pass1;
+        LOG(WARNING) << "Malfeasance detected, aborting measurement";
+        return result;
+    }
+
+    // Second pass - query same servers in same order
+    auto results_pass2 = query_servers(servers, attempts, timeout);
+
+    // Validate causal ordering for second pass
+    auto malfeasance2 = validate_causal_ordering(results_pass2);
+    if (malfeasance2) {
+        result.malfeasance = malfeasance2;
+        result.error = "Causal ordering violation detected in second pass";
+        result.all_results = results_pass2;
+        LOG(WARNING) << "Malfeasance detected in second pass, aborting measurement";
+        return result;
+    }
+
+    // Combine both passes for validation
+    std::vector<QueryResult> combined_results;
+    combined_results.reserve(results_pass1.size() + results_pass2.size());
+    combined_results.insert(combined_results.end(), results_pass1.begin(), results_pass1.end());
+    combined_results.insert(combined_results.end(), results_pass2.begin(), results_pass2.end());
+
+    // Validate causal ordering across both passes
+    auto malfeasance_combined = validate_causal_ordering(combined_results);
+    if (malfeasance_combined) {
+        result.malfeasance = malfeasance_combined;
+        result.error = "Causal ordering violation detected across measurement passes";
+        result.all_results = combined_results;
+        LOG(WARNING) << "Cross-pass malfeasance detected";
+        return result;
+    }
+
+    LOG(INFO) << "Repeated measurement complete, no malfeasance detected";
+
+    // Use second pass results for time calculation (more recent)
+    result.all_results = results_pass2;
 
     // Filter successful results
     std::vector<QueryResult> successful;
