@@ -1067,7 +1067,9 @@ TEST_F(RogueServerTest, TrustedTimeAPIRejectsMajorityRogue) {
     servers.push_back(rogue3_srv);
 
     Client client;
-    auto result = client.query_for_trusted_time(servers, 3);
+    // Query ALL servers (not random subset) to ensure we have both good and rogue
+    // With random selection of 3 from 5, we might pick all rogues which would be undetectable
+    auto result = client.query_for_trusted_time(servers, 5);
 
     // With RFC 8.2 causal ordering validation, this attack is now DETECTED!
     // The rogue servers (+1 year) violate causal ordering when queried after good servers
