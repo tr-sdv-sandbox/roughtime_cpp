@@ -100,9 +100,12 @@ public:
     // any time value with valid cryptographic signatures. Roughtime security requires
     // querying multiple independent servers and computing the median.
     //
-    // This function requires at least min_servers (default 3) successful responses
-    // to return a trusted time. With fewer servers, the result is returned but
-    // is_trusted() will be false.
+    // This function implements RFC 8.2:
+    // - Randomly selects at least min_servers from the server list
+    // - Performs repeated measurement sequence (2 passes)
+    // - Validates causal ordering
+    // - Retries with different servers if malfeasance detected
+    // - Validates network delay is reasonable
     //
     // Parameters:
     //   servers: List of Roughtime servers to query (should be from different operators)
@@ -110,6 +113,7 @@ public:
     //   attempts: Retry attempts per server (default 3)
     //   timeout: Timeout per attempt (default 1000ms)
     //   radius_threshold: Maximum acceptable uncertainty (default 10s)
+    //   max_network_delay: Maximum acceptable network delay (default 2000ms)
     //
     // Returns:
     //   TrustedTimeResult with time if successful, check is_trusted() before using
@@ -118,7 +122,8 @@ public:
         size_t min_servers = 3,
         int attempts = 3,
         std::chrono::milliseconds timeout = std::chrono::milliseconds(1000),
-        std::chrono::seconds radius_threshold = std::chrono::seconds(10)
+        std::chrono::seconds radius_threshold = std::chrono::seconds(10),
+        std::chrono::milliseconds max_network_delay = std::chrono::milliseconds(2000)
     );
 
 private:
