@@ -6,6 +6,7 @@
 #include <roughtime/client.h>
 #include <roughtime/server.h>
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 #include <thread>
 #include <chrono>
 
@@ -248,4 +249,69 @@ TEST_F(CausalOrderingTest, EdgeCaseExactBoundary) {
     // With same server and small time diff, should be within bounds
     auto malfeasance = validate_causal_ordering(results);
     ASSERT_FALSE(malfeasance.has_value());
+}
+
+TEST_F(CausalOrderingTest, MalfeasanceJSONExport) {
+    // RFC 8.4: Test JSON export of malfeasance reports
+    // Setup: One rogue server (way in future), one good server
+    // Query rogue first, then good - this violates causal ordering
+    TestServer rogue(30070, std::chrono::seconds(365 * 86400));  // +1 year
+    TestServer good(30071);
+
+    Client client;
+    std::vector<Server> servers;
+
+    auto rogue_srv = rogue.get_client_config();
+    rogue_srv.name = "rogue-server";
+    servers.push_back(rogue_srv);
+
+    servers.push_back(good.get_client_config());
+
+    // Query both servers in sequence - should detect malfeasance
+    auto results = client.query_servers(servers, 3, std::chrono::milliseconds(1000));
+
+    ASSERT_EQ(results.size(), 2);
+    ASSERT_TRUE(results[0].is_success());
+    ASSERT_TRUE(results[1].is_success());
+
+    // Validate causal ordering - should detect violation
+    auto malfeasance = validate_causal_ordering(results);
+    ASSERT_TRUE(malfeasance.has_value());
+
+    // Export to JSON
+    std::string json = malfeasance->to_json();
+
+    // Verify JSON structure
+    EXPECT_FALSE(json.empty());
+    EXPECT_NE(json.find("\"responses\""), std::string::npos);
+
+    // Parse JSON to verify structure
+    auto j = nlohmann::json::parse(json);
+
+    ASSERT_TRUE(j.contains("responses"));
+    ASSERT_TRUE(j["responses"].is_array());
+    ASSERT_EQ(j["responses"].size(), 2);  // Two successful queries
+
+    // First response should NOT have "rand"
+    EXPECT_FALSE(j["responses"][0].contains("rand"));
+    EXPECT_TRUE(j["responses"][0].contains("request"));
+    EXPECT_TRUE(j["responses"][0].contains("response"));
+    EXPECT_TRUE(j["responses"][0].contains("publicKey"));
+
+    // Second response SHOULD have "rand"
+    EXPECT_TRUE(j["responses"][1].contains("rand"));
+    EXPECT_TRUE(j["responses"][1].contains("request"));
+    EXPECT_TRUE(j["responses"][1].contains("response"));
+    EXPECT_TRUE(j["responses"][1].contains("publicKey"));
+
+    // Verify base64 encoded fields are non-empty strings
+    EXPECT_TRUE(j["responses"][0]["request"].is_string());
+    EXPECT_TRUE(j["responses"][0]["response"].is_string());
+    EXPECT_TRUE(j["responses"][0]["publicKey"].is_string());
+    EXPECT_FALSE(j["responses"][0]["request"].get<std::string>().empty());
+    EXPECT_FALSE(j["responses"][0]["response"].get<std::string>().empty());
+    EXPECT_FALSE(j["responses"][0]["publicKey"].get<std::string>().empty());
+
+    EXPECT_TRUE(j["responses"][1]["rand"].is_string());
+    EXPECT_FALSE(j["responses"][1]["rand"].get<std::string>().empty());
 }

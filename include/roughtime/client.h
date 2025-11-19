@@ -30,6 +30,7 @@ struct QueryResult {
 };
 
 // Malfeasance report - records causal ordering violation
+// Per RFC 8.4, this contains cryptographic proof that responses arrived in order
 struct MalfeasanceReport {
     size_t server_i_index;  // Earlier query index
     size_t server_j_index;  // Later query index
@@ -42,7 +43,13 @@ struct MalfeasanceReport {
     std::vector<uint8_t> response_i;  // Full response for proof
     std::vector<uint8_t> response_j;  // Full response for proof
 
+    // RFC 8.4: Complete query sequence for cryptographic proof
+    std::vector<QueryResult> all_results;
+
     std::string to_string() const;
+
+    // Export malfeasance report in RFC 8.4 JSON format
+    std::string to_json() const;
 };
 
 // Result of querying multiple servers for trusted time

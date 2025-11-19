@@ -5,6 +5,7 @@
 #include "roughtime/protocol.h"
 #include "roughtime/util.h"
 #include <glog/logging.h>
+#include <nlohmann/json.hpp>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -271,6 +272,52 @@ std::string MalfeasanceReport::to_string() const {
     return oss.str();
 }
 
+std::string MalfeasanceReport::to_json() const {
+    // RFC 8.4: Export malfeasance report in JSON format
+    // This provides cryptographic proof that responses arrived in order
+    using json = nlohmann::json;
+
+    json report;
+    json responses = json::array();
+
+    for (size_t i = 0; i < all_results.size(); i++) {
+        const auto& result = all_results[i];
+
+        // Skip failed queries - only include successful responses
+        if (!result.is_success()) {
+            continue;
+        }
+
+        json response_obj;
+
+        // RFC 8.4: "rand" is the 32-byte value used to generate the nonce
+        // It MUST be omitted from the first response
+        if (i > 0 && !result.blind.empty()) {
+            response_obj["rand"] = util::encode_base64(result.blind.data(), result.blind.size());
+        }
+
+        // RFC 8.4: Full request packet including ROUGHTIM header
+        response_obj["request"] = util::encode_base64(result.request.data(), result.request.size());
+
+        // RFC 8.4: Full response packet including ROUGHTIM header
+        response_obj["response"] = util::encode_base64(result.response.data(), result.response.size());
+
+        // RFC 8.4: Long-term public key the server was expected to use
+        if (result.server) {
+            response_obj["publicKey"] = util::encode_base64(
+                result.server->public_key.data(),
+                result.server->public_key.size()
+            );
+        }
+
+        responses.push_back(response_obj);
+    }
+
+    report["responses"] = responses;
+
+    return report.dump(2);  // Pretty-print with 2-space indent
+}
+
 std::optional<MalfeasanceReport> validate_causal_ordering(
     const std::vector<QueryResult>& results
 ) {
@@ -303,6 +350,9 @@ std::optional<MalfeasanceReport> validate_causal_ordering(
                 report.radius_j = results[j].radius;
                 report.response_i = results[i].response;
                 report.response_j = results[j].response;
+
+                // RFC 8.4: Store complete query sequence for cryptographic proof
+                report.all_results = results;
 
                 LOG(ERROR) << "Causal ordering violation detected:";
                 LOG(ERROR) << report.to_string();
