@@ -31,6 +31,7 @@ protected:
         config.radius = std::chrono::seconds(1);
         config.cert_validity = std::chrono::hours(48);
         config.rate_limit.enabled = false;  // Disable rate limiting for performance tests
+        config.enable_grease = false;  // Disable grease for deterministic performance tests
 
         server_ = std::make_unique<server::Server>(config);
         server_thread_ = std::thread([this]() {
