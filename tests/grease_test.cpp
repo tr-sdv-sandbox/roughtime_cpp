@@ -106,25 +106,29 @@ TEST_F(GreaseTest, ClientRejectsGreasedResponses) {
 
     Client client;
 
-    // Query multiple times - all should fail because all responses are greased
+    // Query multiple times - with 100% grease, some will fail
     int failed_count = 0;
-    int attempts = 10;
+    int success_count = 0;
+    int attempts = 50;  // Larger sample size for stable statistics
 
     for (int i = 0; i < attempts; i++) {
         auto result = client.query(srv, 1, std::chrono::milliseconds(1000), std::nullopt);
 
         if (!result.is_success()) {
             failed_count++;
+        } else {
+            success_count++;
         }
     }
 
     // With 100% grease, client should reject MOST responses
     // UNDEFINED_TAG (1/5 types) should succeed (RFC: clients MUST ignore undefined tags)
     // Other 4 types should fail
-    // Expected: ~80% failure, ~20% success (with random variance)
-    EXPECT_GE(failed_count, attempts * 0.5);  // At least 50% should fail
-    EXPECT_GT(failed_count, 0);  // Some failures
-    EXPECT_LT(failed_count, attempts);  // But not all (UNDEFINED_TAG should pass)
+    // Expected: ~80% failure, ~20% success
+    // With larger sample size, should be close to expected distribution
+    EXPECT_GT(failed_count, attempts * 0.6);  // At least 60% should fail (80% expected)
+    EXPECT_GT(success_count, 0);  // Some successes (UNDEFINED_TAG passes)
+    EXPECT_LT(success_count, attempts * 0.4);  // Less than 40% success (20% expected)
 
     test_server->stop();
     if (server_thread.joinable()) {
