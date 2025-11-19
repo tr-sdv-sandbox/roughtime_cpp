@@ -39,6 +39,17 @@ std::optional<Certificate> create_certificate(
     const std::array<uint8_t, 64>& root_private_key
 );
 
+// Grease types per RFC Section 7
+// Used to prevent protocol ossification and ensure clients validate properly
+enum class GreaseType {
+    NONE,
+    MISSING_MANDATORY_TAG,   // Omit mandatory tags (NONC, MIDP, RADI)
+    WRONG_VERSION,           // VER not in client request
+    UNDEFINED_TAG,           // Add undefined/random tags
+    INVALID_CERT_SIG,        // Corrupt certificate signature + wrong time
+    INVALID_SREP_SIG,        // Corrupt SREP signature + wrong time
+};
+
 // Server configuration
 struct ServerConfig {
     std::string address;
@@ -48,6 +59,12 @@ struct ServerConfig {
     std::chrono::hours cert_validity;  // Certificate validity duration
     RateLimitConfig rate_limit;  // Rate limiting configuration
     std::chrono::seconds time_offset{0};  // Time offset for testing (0 = real time)
+
+    // RFC Section 7: Grease to prevent protocol ossification
+    // Servers SHOULD send invalid responses occasionally to ensure clients validate
+    bool enable_grease{true};      // Default ON to force proper client validation
+    double grease_probability{0.1};  // 10% of responses are greased
+    std::optional<GreaseType> forced_grease_type;  // Force specific grease type (for testing)
 };
 
 // Parsed client request

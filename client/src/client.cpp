@@ -110,6 +110,7 @@ public:
         auto start_time = std::chrono::steady_clock::now();
 
         // Try to query the server
+        // RFC Section 7: Retry on greased/invalid responses (treat as temporary failure)
         std::vector<uint8_t> response;
         bool success = false;
 
@@ -143,7 +144,21 @@ public:
 
             if (received > 0) {
                 response.assign(buffer, buffer + received);
-                success = true;
+
+                // RFC Section 7: Verify response INSIDE retry loop
+                // Greased responses are treated as temporary failures and trigger retry
+                auto verified = verify_reply(version_pref, response, server.public_key, req_opt->nonce);
+                if (verified) {
+                    // Valid response - success!
+                    result.response = std::move(response);
+                    result.midpoint = verified->midpoint;
+                    result.radius = verified->radius;
+                    success = true;
+                } else {
+                    // Invalid/greased response - will retry
+                    LOG(WARNING) << "Invalid response on attempt " << (attempt + 1)
+                                << "/" << attempts << ", retrying...";
+                }
             } else if (received < 0) {
                 LOG(WARNING) << "recvfrom() failed: " << strerror(errno);
             } else {
@@ -159,22 +174,10 @@ public:
         );
 
         if (!success) {
-            result.error = "No reply from server";
-            LOG(ERROR) << "No reply received from server after " << attempts << " attempts";
+            result.error = "No valid reply from server";
+            LOG(ERROR) << "No valid reply received from server after " << attempts << " attempts";
             return result;
         }
-
-        // Verify response
-        auto verified = verify_reply(version_pref, response, server.public_key, req_opt->nonce);
-        if (!verified) {
-            result.error = "Failed to verify response";
-            LOG(ERROR) << "Response verification failed";
-            return result;
-        }
-
-        result.response = std::move(response);
-        result.midpoint = verified->midpoint;
-        result.radius = verified->radius;
 
         return result;
     }

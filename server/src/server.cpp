@@ -389,6 +389,284 @@ std::optional<ParsedRequest> parse_request(const std::vector<uint8_t>& request_b
     return req;
 }
 
+// RFC Section 7: Grease helper functions
+
+// Decide whether to grease this response based on probability
+bool should_grease(const ServerConfig& config) {
+    if (!config.enable_grease || config.grease_probability <= 0.0) {
+        return false;
+    }
+    if (config.grease_probability >= 1.0) {
+        return true;
+    }
+
+    // Generate random number [0.0, 1.0)
+    uint32_t rand_val;
+    if (RAND_bytes(reinterpret_cast<unsigned char*>(&rand_val), sizeof(rand_val)) != 1) {
+        return false;  // If random generation fails, don't grease
+    }
+    double rand_fraction = static_cast<double>(rand_val) / static_cast<double>(UINT32_MAX);
+
+    return rand_fraction < config.grease_probability;
+}
+
+// Randomly choose a grease type
+GreaseType choose_grease_type() {
+    uint32_t rand_val;
+    if (RAND_bytes(reinterpret_cast<unsigned char*>(&rand_val), sizeof(rand_val)) != 1) {
+        return GreaseType::NONE;
+    }
+
+    // Randomly select from 5 grease types
+    GreaseType types[] = {
+        GreaseType::MISSING_MANDATORY_TAG,
+        GreaseType::WRONG_VERSION,
+        GreaseType::UNDEFINED_TAG,
+        GreaseType::INVALID_CERT_SIG,
+        GreaseType::INVALID_SREP_SIG
+    };
+
+    return types[rand_val % 5];
+}
+
+// Create a greased (invalid) response
+// Per RFC Section 7: MUST NOT send incorrect times with valid signatures
+std::vector<uint8_t> create_greased_response(
+    const ParsedRequest& req,
+    GreaseType grease_type,
+    std::chrono::system_clock::time_point midpoint,
+    std::chrono::seconds radius,
+    const Certificate& cert
+) {
+    LOG(INFO) << "Greasing response with type: " << static_cast<int>(grease_type);
+
+    Version response_version = req.response_version;
+    bool version_ietf = (response_version != Version::Google);
+
+    // Create a basic valid response first, then corrupt it
+    uint64_t midpoint_val = timestamp::encode_midpoint(response_version, midpoint);
+    uint32_t radius_val = static_cast<uint32_t>(timestamp::encode_radius(response_version, radius));
+
+    Message srep;
+    std::vector<uint8_t> midp_bytes(8);
+    std::vector<uint8_t> radi_bytes(4);
+    write_le64(midp_bytes.data(), midpoint_val);
+    write_le32(radi_bytes.data(), radius_val);
+
+    // Build Merkle tree with single nonce
+    size_t nonce_size = version_ietf ? 32 : 64;
+    crypto::MerkleTree tree(nonce_size, {req.nonce});
+    auto root = tree.root();
+
+    srep[tags::MIDP] = midp_bytes;
+    srep[tags::RADI] = radi_bytes;
+    srep[tags::ROOT] = root;
+
+    auto srep_bytes = encode(srep);
+
+    // Sign the response
+    const char* response_context = timestamp::response_context_string(response_version);
+    std::vector<uint8_t> to_sign(response_context, response_context + std::strlen(response_context));
+    to_sign.insert(to_sign.end(), srep_bytes.begin(), srep_bytes.end());
+
+    std::array<uint8_t, 64> signature;
+    ed25519_sign(signature, to_sign.data(), to_sign.size(), cert.online_private_key.data());
+
+    // Build reply
+    Message reply;
+
+    switch (grease_type) {
+        case GreaseType::MISSING_MANDATORY_TAG: {
+            // Omit NONC (mandatory tag)
+            reply[tags::SREP] = srep_bytes;
+            reply[tags::SIG] = std::vector<uint8_t>(signature.begin(), signature.end());
+
+            // Choose certificate based on response version
+            if (response_version == Version::Draft14) {
+                reply[tags::CERT] = cert.bytes_draft14;
+            } else if (version_ietf) {
+                reply[tags::CERT] = cert.bytes_ietf_mjd;
+            } else {
+                reply[tags::CERT] = cert.bytes_google;
+            }
+
+            // Missing NONC!
+            reply[tags::INDX] = {0x00, 0x00, 0x00, 0x00};
+            reply[tags::PATH] = {};
+            break;
+        }
+
+        case GreaseType::WRONG_VERSION: {
+            // Use version NOT in client request
+            reply[tags::SREP] = srep_bytes;
+            reply[tags::SIG] = std::vector<uint8_t>(signature.begin(), signature.end());
+
+            // Choose certificate based on response version
+            if (response_version == Version::Draft14) {
+                reply[tags::CERT] = cert.bytes_draft14;
+            } else if (version_ietf) {
+                reply[tags::CERT] = cert.bytes_ietf_mjd;
+            } else {
+                reply[tags::CERT] = cert.bytes_google;
+            }
+
+            reply[tags::NONC] = req.nonce;
+            reply[tags::INDX] = {0x00, 0x00, 0x00, 0x00};
+            reply[tags::PATH] = {};
+
+            if (version_ietf) {
+                // Send wrong version (e.g., Draft-08 when client requested Draft-14)
+                std::vector<uint8_t> ver_bytes(4);
+                write_le32(ver_bytes.data(), 0x08000080);  // Draft-08, not what client requested
+                reply[tags::VER] = ver_bytes;
+            }
+            break;
+        }
+
+        case GreaseType::UNDEFINED_TAG: {
+            // Add undefined/random tags
+            reply[tags::SREP] = srep_bytes;
+            reply[tags::SIG] = std::vector<uint8_t>(signature.begin(), signature.end());
+
+            // Choose certificate based on response version
+            if (response_version == Version::Draft14) {
+                reply[tags::CERT] = cert.bytes_draft14;
+            } else if (version_ietf) {
+                reply[tags::CERT] = cert.bytes_ietf_mjd;
+            } else {
+                reply[tags::CERT] = cert.bytes_google;
+            }
+
+            reply[tags::NONC] = req.nonce;
+            reply[tags::INDX] = {0x00, 0x00, 0x00, 0x00};
+            reply[tags::PATH] = {};
+
+            if (version_ietf) {
+                std::vector<uint8_t> ver_bytes(4);
+                write_le32(ver_bytes.data(), static_cast<uint32_t>(response_version));
+                reply[tags::VER] = ver_bytes;
+            }
+
+            // Add undefined tag
+            reply[0xDEADBEEF] = {0x01, 0x02, 0x03, 0x04};
+            break;
+        }
+
+        case GreaseType::INVALID_CERT_SIG: {
+            // Corrupt certificate signature + use WRONG time
+            // RFC: MUST NOT send correct time with invalid signature,
+            // so we corrupt time too
+            std::vector<uint8_t> wrong_midp_bytes(8);
+            write_le64(wrong_midp_bytes.data(), midpoint_val + 86400);  // +1 day
+
+            Message wrong_srep;
+            wrong_srep[tags::MIDP] = wrong_midp_bytes;
+            wrong_srep[tags::RADI] = radi_bytes;
+            wrong_srep[tags::ROOT] = root;
+            auto wrong_srep_bytes = encode(wrong_srep);
+
+            // Sign with wrong SREP
+            std::vector<uint8_t> to_sign_wrong(response_context, response_context + std::strlen(response_context));
+            to_sign_wrong.insert(to_sign_wrong.end(), wrong_srep_bytes.begin(), wrong_srep_bytes.end());
+            std::array<uint8_t, 64> sig_wrong;
+            ed25519_sign(sig_wrong, to_sign_wrong.data(), to_sign_wrong.size(), cert.online_private_key.data());
+
+            // Corrupt certificate
+            std::vector<uint8_t> corrupt_cert;
+            if (response_version == Version::Draft14) {
+                corrupt_cert = cert.bytes_draft14;
+            } else if (version_ietf) {
+                corrupt_cert = cert.bytes_ietf_mjd;
+            } else {
+                corrupt_cert = cert.bytes_google;
+            }
+            if (!corrupt_cert.empty()) {
+                corrupt_cert[0] ^= 0xFF;  // Flip bits in first byte
+            }
+
+            reply[tags::SREP] = wrong_srep_bytes;
+            reply[tags::SIG] = std::vector<uint8_t>(sig_wrong.begin(), sig_wrong.end());
+            reply[tags::CERT] = corrupt_cert;
+            reply[tags::NONC] = req.nonce;
+            reply[tags::INDX] = {0x00, 0x00, 0x00, 0x00};
+            reply[tags::PATH] = {};
+
+            if (version_ietf) {
+                std::vector<uint8_t> ver_bytes(4);
+                write_le32(ver_bytes.data(), static_cast<uint32_t>(response_version));
+                reply[tags::VER] = ver_bytes;
+            }
+            break;
+        }
+
+        case GreaseType::INVALID_SREP_SIG: {
+            // Corrupt SREP signature + use WRONG time
+            std::vector<uint8_t> wrong_midp_bytes(8);
+            write_le64(wrong_midp_bytes.data(), midpoint_val + 86400);  // +1 day
+
+            Message wrong_srep;
+            wrong_srep[tags::MIDP] = wrong_midp_bytes;
+            wrong_srep[tags::RADI] = radi_bytes;
+            wrong_srep[tags::ROOT] = root;
+            auto wrong_srep_bytes = encode(wrong_srep);
+
+            // Create invalid signature by corrupting valid one
+            std::array<uint8_t, 64> sig_invalid = signature;
+            sig_invalid[0] ^= 0xFF;  // Flip bits
+
+            reply[tags::SREP] = wrong_srep_bytes;
+            reply[tags::SIG] = std::vector<uint8_t>(sig_invalid.begin(), sig_invalid.end());
+
+            // Choose certificate based on response version
+            if (response_version == Version::Draft14) {
+                reply[tags::CERT] = cert.bytes_draft14;
+            } else if (version_ietf) {
+                reply[tags::CERT] = cert.bytes_ietf_mjd;
+            } else {
+                reply[tags::CERT] = cert.bytes_google;
+            }
+
+            reply[tags::NONC] = req.nonce;
+            reply[tags::INDX] = {0x00, 0x00, 0x00, 0x00};
+            reply[tags::PATH] = {};
+
+            if (version_ietf) {
+                std::vector<uint8_t> ver_bytes(4);
+                write_le32(ver_bytes.data(), static_cast<uint32_t>(response_version));
+                reply[tags::VER] = ver_bytes;
+            }
+            break;
+        }
+
+        default:
+            // Shouldn't happen, but return valid response as fallback
+            reply[tags::SREP] = srep_bytes;
+            reply[tags::SIG] = std::vector<uint8_t>(signature.begin(), signature.end());
+
+            // Choose certificate based on response version
+            if (response_version == Version::Draft14) {
+                reply[tags::CERT] = cert.bytes_draft14;
+            } else if (version_ietf) {
+                reply[tags::CERT] = cert.bytes_ietf_mjd;
+            } else {
+                reply[tags::CERT] = cert.bytes_google;
+            }
+
+            reply[tags::NONC] = req.nonce;
+            reply[tags::INDX] = {0x00, 0x00, 0x00, 0x00};
+            reply[tags::PATH] = {};
+
+            if (version_ietf) {
+                std::vector<uint8_t> ver_bytes(4);
+                write_le32(ver_bytes.data(), static_cast<uint32_t>(response_version));
+                reply[tags::VER] = ver_bytes;
+            }
+            break;
+    }
+
+    return encode_framed(version_ietf, encode(reply));
+}
+
 // Create responses for batch of requests
 std::vector<std::vector<uint8_t>> create_replies(
     const std::vector<ParsedRequest>& requests,
@@ -633,17 +911,28 @@ private:
             return;
         }
 
-        // Create reply (apply time offset for testing)
+        // RFC Section 7: Decide whether to grease this response
         auto now = std::chrono::system_clock::now() + config_.time_offset;
-        auto replies = create_replies({*req}, now, config_.radius, cert_);
+        std::vector<uint8_t> response;
 
-        if (replies.empty()) {
-            LOG(ERROR) << "Failed to create reply";
-            return;
+        if (should_grease(config_)) {
+            // Send greased (invalid) response to test client validation
+            GreaseType grease_type = config_.forced_grease_type.value_or(choose_grease_type());
+            response = create_greased_response(*req, grease_type, now, config_.radius, cert_);
+        } else {
+            // Normal response
+            auto replies = create_replies({*req}, now, config_.radius, cert_);
+
+            if (replies.empty()) {
+                LOG(ERROR) << "Failed to create reply";
+                return;
+            }
+
+            response = replies[0];
         }
 
         // Send response
-        ssize_t sent = sendto(socket_fd_, replies[0].data(), replies[0].size(), 0,
+        ssize_t sent = sendto(socket_fd_, response.data(), response.size(), 0,
                              reinterpret_cast<const struct sockaddr*>(&client_addr), sizeof(client_addr));
 
         if (sent < 0) {
