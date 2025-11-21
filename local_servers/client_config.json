@@ -1,0 +1,40 @@
+{
+  "servers": [
+    {
+      "name": "local-server-1",
+      "version": "IETF-Roughtime",
+      "publicKeyType": "ed25519",
+      "publicKey": "VKNwlF9UPTteyiQYz65ImqI/r1vkcUF1zPwQeukm9r4=",
+      "addresses": [
+        {
+          "protocol": "udp",
+          "address": "192.168.110.244:3002"
+        }
+      ]
+    },
+    {
+      "name": "local-server-2",
+      "version": "IETF-Roughtime",
+      "publicKeyType": "ed25519",
+      "publicKey": "cIpDTFkAINXfU44PSzXAUKE53KhO4TeaMjzoPME3tRQ=",
+      "addresses": [
+        {
+          "protocol": "udp",
+          "address": "192.168.110.244:3003"
+        }
+      ]
+    },
+    {
+      "name": "local-server-3",
+      "version": "IETF-Roughtime",
+      "publicKeyType": "ed25519",
+      "publicKey": "LyFavjhviwQPdNqkdsEvugJ29bOd+LeYGskaq8op1wc=",
+      "addresses": [
+        {
+          "protocol": "udp",
+          "address": "192.168.110.244:3004"
+        }
+      ]
+    }
+  ]
+}

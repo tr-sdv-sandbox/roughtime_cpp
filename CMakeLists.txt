@@ -112,8 +112,16 @@ target_link_libraries(roughtime-server
         roughtime
 )
 
+# Key generation tool
+add_executable(roughtime-keygen src/keygen_tool.cpp)
+target_link_libraries(roughtime-keygen
+    PRIVATE
+        roughtime_server
+        roughtime
+)
+
 # Install targets
-install(TARGETS roughtime roughtime_client roughtime_server getroughtime roughtime-server
+install(TARGETS roughtime roughtime_client roughtime_server getroughtime roughtime-server roughtime-keygen
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
     RUNTIME DESTINATION bin
@@ -144,6 +152,6 @@ message(STATUS "    Sanitizers:        ${ENABLE_SANITIZERS}")
 message(STATUS "    Coverage:          ${ENABLE_COVERAGE}")
 message(STATUS "    LTO:               ${ENABLE_LTO}")
 message(STATUS "")
-message(STATUS "  Executables:         getroughtime, roughtime-server")
+message(STATUS "  Executables:         getroughtime, roughtime-server, roughtime-keygen")
 message(STATUS "==========================================")
 message(STATUS "")

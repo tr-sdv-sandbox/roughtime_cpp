@@ -1,0 +1,10 @@
+{
+  "address": "0.0.0.0",
+  "certValidity": 48,
+  "name": "local-server-2",
+  "port": 3003,
+  "publicKey": "cIpDTFkAINXfU44PSzXAUKE53KhO4TeaMjzoPME3tRQ=",
+  "publicKeyType": "ed25519",
+  "radius": 1,
+  "rootKeySeed": "dd10ae4ff1237e5a5371ff663cd94f571c5abb10673ef697ff278dbbcaa866d2"
+}
